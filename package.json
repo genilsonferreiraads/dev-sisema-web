@@ -1,0 +1,53 @@
+{
+  "name": "imperio-fitness",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@headlessui/react": "^1.7.19",
+    "@heroicons/react": "^2.2.0",
+    "@supabase/supabase-js": "^2.47.10",
+    "@types/node": "^16.18.86",
+    "@types/react": "^18.2.63",
+    "@types/react-dom": "^18.2.19",
+    "autoprefixer": "^10.4.20",
+    "howler": "^2.2.4",
+    "postcss": "^8.4.49",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.4.0",
+    "react-player": "^2.16.0",
+    "react-scripts": "5.0.1",
+    "react-youtube": "^10.1.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^4.9.5",
+    "wavesurfer.js": "^7.8.15"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@types/react-icons": "^2.2.7"
+  }
+}

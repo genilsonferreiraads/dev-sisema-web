@@ -1,0 +1,14 @@
+@keyframes popupAppear {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.popup-animation {
+  animation: popupAppear 0.2s ease-out forwards;
+} 
