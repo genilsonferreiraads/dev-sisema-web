@@ -29,22 +29,17 @@ export interface VideoData {
 }
 
 export const audioService = {
-  async getAudios() {
+  getAudios: async (): Promise<AudioData[]> => {
     const { data, error } = await supabase
       .from('audios')
       .select('*')
       .order('created_at', { ascending: false });
     
-    if (error) {
-      console.error('Erro ao buscar áudios:', error);
-      throw error;
-    }
-
-    console.log('Dados retornados do Supabase:', data); // Para debug
-    return data as AudioData[];
+    if (error) throw error;
+    return data || [];
   },
 
-  async addAudio(audio: Omit<AudioData, 'id' | 'created_at'>) {
+  addAudio: async (audio: Omit<AudioData, 'id' | 'created_at'>): Promise<AudioData> => {
     console.log('Tentando adicionar áudio com dados:', audio);
     
     const { data, error } = await supabase
@@ -71,7 +66,7 @@ export const audioService = {
     return data as AudioData;
   },
 
-  async deleteAudio(id: string) {
+  deleteAudio: async (id: string): Promise<void> => {
     const { error } = await supabase
       .from('audios')
       .delete()
@@ -80,7 +75,7 @@ export const audioService = {
     if (error) throw error;
   },
 
-  updateAudio: async (id: string, updates: Partial<AudioData>) => {
+  updateAudio: async (id: string, updates: Partial<AudioData>): Promise<AudioData> => {
     const { data, error } = await supabase
       .from('audios')
       .update(updates)
@@ -98,7 +93,7 @@ export const audioService = {
     last_played_at?: string;
     play_count?: number;
     timer_end_at?: string;
-  }) => {
+  }): Promise<AudioData> => {
     const { data, error } = await supabase
       .from('audios')
       .update(preferences)
@@ -110,7 +105,13 @@ export const audioService = {
     return data as AudioData;
   },
 
-  loadPreferences: async (audioId: string) => {
+  loadPreferences: async (audioId: string): Promise<{
+    auto_repeat: boolean;
+    repeat_interval: number;
+    last_played_at?: string;
+    play_count: number;
+    timer_end_at?: string;
+  }> => {
     const { data, error } = await supabase
       .from('audios')
       .select('auto_repeat, repeat_interval, last_played_at, play_count, timer_end_at')
@@ -119,35 +120,50 @@ export const audioService = {
 
     if (error) throw error;
     return data;
+  },
+
+  getAudio: async (audioId: string): Promise<AudioData | null> => {
+    const { data, error } = await supabase
+      .from('audios')
+      .select('*')
+      .eq('id', audioId)
+      .single();
+      
+    if (error) {
+      console.error('Erro ao buscar áudio:', error);
+      return null;
+    }
+    
+    return data;
   }
 };
 
 export const videoService = {
-  async getVideos(): Promise<VideoData[]> {
+  async getRecentVideos() {
     const { data, error } = await supabase
       .from('videos')
       .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return data || [];
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    if (error) {
+      throw new Error(`Erro ao buscar vídeos: ${error.message}`);
+    }
+    return data as VideoData[];
   },
 
-  async addVideo(url: string): Promise<VideoData> {
+  async addVideo(url: string, title: string) {
     if (!url) {
       throw new Error('URL não pode estar vazia');
     }
-
-    console.log('Tentando adicionar vídeo:', { url });
     
     const { data, error } = await supabase
       .from('videos')
-      .insert([{ url }])
+      .insert([{ url, title }])
       .select()
       .single();
     
     if (error) {
-      console.error('Erro detalhado do Supabase:', error);
       throw new Error(
         error.message || 
         'Erro ao adicionar vídeo no banco de dados'
@@ -158,7 +174,6 @@ export const videoService = {
       throw new Error('Nenhum dado retornado após inserção');
     }
 
-    console.log('Vídeo adicionado com sucesso:', data);
     return data as VideoData;
   },
 

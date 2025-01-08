@@ -15,20 +15,15 @@ const App: React.FC = () => {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
   useEffect(() => {
-    console.log('Estado do usuário atualizado:', user);
-  }, [user]);
-
-  useEffect(() => {
     checkUser();
   }, []);
 
   const checkUser = async () => {
     try {
       const user = await authService.getCurrentUser();
-      console.log('Usuário obtido em checkUser:', user);
       setUser(user);
     } catch (error) {
-      console.error('Erro ao verificar usuário:', error);
+      // Silenciosamente lida com o erro
     } finally {
       setLoading(false);
     }
@@ -36,15 +31,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (audioEnded && videoEnded) {
-      console.log('Ambos terminaram, preparando reinício');
-      
       // Resetar os estados
       setAudioEnded(false);
       setVideoEnded(false);
       
       // Pequeno delay antes de iniciar
       setTimeout(() => {
-        console.log('Iniciando reprodução dos players');
         setIsAudioPlaying(true);
         setIsVideoPlaying(true);
       }, 100);
@@ -52,13 +44,11 @@ const App: React.FC = () => {
   }, [audioEnded, videoEnded]);
 
   const handleAudioEnd = () => {
-    console.log('Áudio terminou no App, atualizando estado');
     setAudioEnded(true);
     setIsAudioPlaying(false);
   };
 
   const handleVideoEnd = () => {
-    console.log('Vídeo terminou no App, atualizando estado');
     setVideoEnded(true);
     setIsVideoPlaying(false);
   };
@@ -101,7 +91,7 @@ const App: React.FC = () => {
         onUserUpdate={updateUser}
       />
       <main className="container mx-auto px-4 pt-24 pb-8">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="w-full">
             <AudioPlayer 
               onEnded={handleAudioEnd}

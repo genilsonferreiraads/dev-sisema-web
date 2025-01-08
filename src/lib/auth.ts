@@ -6,26 +6,17 @@ export const authService = {
     if (!username || !password) return null;
 
     try {
-      console.log('Tentando login com:', { username });
-
       const { data, error } = await supabase
         .rpc('check_password', {
           p_username: username,
           p_password: password
         });
 
-      console.log('Resposta do Supabase:', { data, error });
-
-      if (error) {
-        console.error('Erro na autenticação:', error);
-        throw error;
-      }
+      if (error) throw error;
       
       if (data && Array.isArray(data) && data.length > 0) {
         const user = data[0];
-        console.log('Usuário encontrado:', { ...user, password: '[REDACTED]' });
         
-        // Armazena apenas os dados necessários
         const userData: User = {
           id: user.id,
           username: user.username,
@@ -38,10 +29,8 @@ export const authService = {
         return userData;
       }
 
-      console.log('Nenhum usuário encontrado');
       return null;
     } catch (error) {
-      console.error('Erro ao fazer login:', error);
       throw error;
     }
   },

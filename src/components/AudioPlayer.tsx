@@ -49,6 +49,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationRef = useRef<number | null>(null);
+  const isPlayingRef = useRef(false);
+  const endTimeRefs = useRef<Record<string, string>>({});
 
   useEffect(() => {
     loadAudios();
@@ -81,32 +83,29 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         const endTime = new Date(prefs.timer_end_at).getTime();
         const now = Date.now();
         const timeLeft = Math.max(0, Math.floor((endTime - now) / 1000));
-        
-        if (timeLeft > 0) {
+
+        // Se ainda há tempo restante ou se acabou de terminar
+        if (timeLeft >= 0) {
           const interval = prefs.repeat_interval * 60;
           
-          // Cria um timer temporário que será substituído pelo startNewTimerCycle
-          const tempIntervalId = setInterval(() => {}, 1000);
-          
-          // Atualiza o timer com o tempo restante real
-          setAudioTimers(prev => ({
-            ...prev,
-            [audioId]: {
-              interval,
-              timeLeft,
-              intervalId: tempIntervalId,
-              endTime: prefs.timer_end_at
-            }
-          }));
-          
-          // Inicia o ciclo do timer
-          startNewTimerCycle(audioId, interval, prefs.timer_end_at);
-          
-          // Limpa o timer temporário
-          clearInterval(tempIntervalId);
-          
-          console.log(`Restaurando timer para ${audioId} com ${timeLeft}s restantes de ${interval}s totais`);
+          // Se o timer acabou de terminar, cria um novo ciclo
+          if (timeLeft === 0) {
+            const newEndTime = new Date(Date.now() + interval * 1000).toISOString();
+            
+            // Atualiza o endTime no banco
+            await audioService.updatePreferences(audioId, {
+              ...prefs,
+              timer_end_at: newEndTime
+            });
+
+            // Inicia novo ciclo com o novo endTime
+            startNewTimerCycle(audioId, interval, newEndTime);
+          } else {
+            // Continua o ciclo atual com o tempo restante
+            startNewTimerCycle(audioId, interval, prefs.timer_end_at);
+          }
         } else {
+          // Se o timer expirou há muito tempo, desativa-o
           await audioService.updatePreferences(audioId, {
             auto_repeat: false,
             timer_end_at: undefined,
@@ -115,6 +114,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
 
+      // Atualiza as preferências locais
       setPreferences(prev => ({
         ...prev,
         [audioId]: {
@@ -124,8 +124,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           play_count: prefs.play_count || 0
         }
       }));
+
     } catch (error) {
-      console.error('Erro ao carregar preferências:', error);
+      // Mantém o erro silencioso
     }
   };
 
@@ -147,150 +148,172 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   };
 
   const startNewTimerCycle = (audioId: string, interval: number, existingEndTime?: string) => {
-    const endTime = existingEndTime || new Date(Date.now() + interval * 1000).toISOString();
+    endTimeRefs.current[audioId] = existingEndTime || new Date(Date.now() + interval * 1000).toISOString();
+    const initialTimeLeft = Math.max(0, Math.floor((new Date(endTimeRefs.current[audioId]).getTime() - Date.now()) / 1000));
     
     if (timersRef.current[audioId]) {
       clearInterval(timersRef.current[audioId]);
     }
 
-    const intervalId = setInterval(() => {
-      setAudioTimers(prev => {
-        const currentTimer = prev[audioId];
-        if (!currentTimer) return prev;
+    let attemptCount = 0;
+    const MAX_ATTEMPTS = 3;
 
-        const currentTime = Date.now();
-        const timerEndTime = new Date(currentTimer.endTime).getTime();
-        const newTimeLeft = Math.max(0, Math.floor((timerEndTime - currentTime) / 1000));
-
-        if (newTimeLeft === 0) {
-          return prev;
+    const createNewCycle = async () => {
+      try {
+        if (isPlayingRef.current) {
+          if (attemptCount < MAX_ATTEMPTS) {
+            attemptCount++;
+            setTimeout(() => createNewCycle(), 1000);
+          } else {
+            isPlayingRef.current = false;
+          }
+          return;
         }
 
-        return {
-          ...prev,
-          [audioId]: {
-            ...currentTimer,
-            timeLeft: newTimeLeft
+        isPlayingRef.current = true;
+        attemptCount = 0;
+        
+        const audioData = await audioService.getAudio(audioId);
+        if (!audioData) {
+          isPlayingRef.current = false;
+          return;
+        }
+
+        // Primeiro atualiza as preferências
+        const newEndTime = new Date(Date.now() + interval * 1000).toISOString();
+        await audioService.updatePreferences(audioId, {
+          auto_repeat: true,
+          repeat_interval: interval / 60,
+          timer_end_at: newEndTime
+        });
+
+        endTimeRefs.current[audioId] = newEndTime;
+
+        // Depois prepara o áudio
+        if (audioRef.current) {
+          audioRef.current.src = audioData.url;
+          audioRef.current.currentTime = 0;
+
+          // Aguarda o áudio estar pronto
+          await new Promise((resolve) => {
+            audioRef.current!.addEventListener('canplay', resolve, { once: true });
+          });
+
+          setCurrentAudio(audioData);
+          setIsPlaying(true);
+
+          try {
+            await audioRef.current.play();
+          } catch (error) {
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            return;
           }
-        };
-      });
+        }
+
+        // Libera para próxima reprodução quando este áudio terminar
+        audioRef.current?.addEventListener('ended', () => {
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+        }, { once: true });
+
+      } catch (error) {
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+      }
+    };
+
+    const intervalId = setInterval(() => {
+      const currentTime = Date.now();
+      const timerEndTime = new Date(endTimeRefs.current[audioId]).getTime();
+      const newTimeLeft = Math.max(0, Math.floor((timerEndTime - currentTime) / 1000));
+
+      if (newTimeLeft === 0 && !isPlayingRef.current) {
+        createNewCycle();
+      }
+
+      setAudioTimers(prev => ({
+        ...prev,
+        [audioId]: {
+          interval,
+          timeLeft: newTimeLeft,
+          intervalId,
+          endTime: endTimeRefs.current[audioId]
+        }
+      }));
     }, 1000);
+
+    timersRef.current[audioId] = intervalId;
 
     setAudioTimers(prev => ({
       ...prev,
       [audioId]: {
         interval,
-        timeLeft: existingEndTime ? 
-          Math.max(0, Math.floor((new Date(existingEndTime).getTime() - Date.now()) / 1000)) : 
-          interval,
+        timeLeft: initialTimeLeft,
         intervalId,
-        endTime
+        endTime: endTimeRefs.current[audioId]
       }
     }));
 
-    timersRef.current[audioId] = intervalId;
+    if (initialTimeLeft === 0) {
+      createNewCycle();
+    }
+
+    return intervalId;
   };
 
-  const handleAudioEnd = async () => {
-    console.log('Áudio terminou, verificando status...');
-    
-    if (playAttemptRef.current) {
-      clearTimeout(playAttemptRef.current);
-      playAttemptRef.current = null;
-    }
-
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-    }
-    setProgress(0);
-
-    // Processa a fila de pendentes
-    if (pendingAudios.length > 0) {
-      const nextAudioId = pendingAudios[0];
-      const nextAudio = audios.find(a => a.id === nextAudioId);
-      setPendingAudios(prev => prev.slice(1));
-
-      if (nextAudio) {
-        const attemptPlay = async (attempts = 0): Promise<void> => {
-          try {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            setCurrentAudio(nextAudio);
-            if (audioRef.current) {
-              await audioRef.current.play();
-              setIsPlaying(true);
-              setPlayAttempts(0);
-            }
-          } catch (error) {
-            console.error(`Erro ao reproduzir próximo áudio (tentativa ${attempts + 1}):`, error);
-            
-            if (error instanceof Error && error.name === 'AbortError' && attempts < MAX_PLAY_ATTEMPTS) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-              return attemptPlay(attempts + 1);
-            }
-            
-            setIsPlaying(false);
-            onEnded();
-          }
-        };
-
-        attemptPlay();
-      }
-    } else {
-      setIsPlaying(false);
+  const handleAudioEnd = () => {
+    if (onEnded) {
       onEnded();
     }
-
-    window.dispatchEvent(new Event('audioStop'));
   };
 
-  const togglePlay = async (audio: AudioData) => {
-    try {
-      // Se está tentando tocar um áudio diferente do atual
-      if (currentAudio?.id !== audio.id) {
-        // Para o áudio atual se estiver tocando
-        if (isPlaying) {
-          audioRef.current?.pause();
-          setIsPlaying(false);
-        }
-        
-        // Atualiza o áudio atual
-        setCurrentAudio(audio);
-        
-        // Pequeno delay para garantir que o áudio foi carregado
-        setTimeout(() => {
-          if (audioRef.current) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.play()
-              .then(() => {
-                setIsPlaying(true);
-                setPlayAttempts(0);
-              })
-              .catch(error => {
-                console.error('Erro ao reproduzir áudio:', error);
+  const togglePlay = (audio: AudioData) => {
+    // Se clicou em um áudio diferente do atual
+    if (currentAudio?.id !== audio.id) {
+      // Para o áudio atual se estiver tocando
+      if (audioRef.current) {
+        audioRef.current.pause();
+        isPlayingRef.current = false;
+      }
+      // Apenas define o novo áudio
+      setCurrentAudio(audio);
+      
+      // Se não tiver timer ativo, inicia a reprodução manualmente
+      if (!audioTimers[audio.id]) {
+        if (audioRef.current) {
+          audioRef.current.src = audio.url;
+          audioRef.current.currentTime = 0;
+          
+          // Aguarda o áudio estar pronto antes de reproduzir
+          audioRef.current.addEventListener('canplay', () => {
+            if (!isPlayingRef.current) {
+              isPlayingRef.current = true;
+              setIsPlaying(true);
+              audioRef.current?.play().catch(() => {
+                isPlayingRef.current = false;
                 setIsPlaying(false);
               });
-          }
-        }, 100);
-      } else {
-        // Se é o mesmo áudio, apenas alterna play/pause
-        if (isPlaying) {
-          audioRef.current?.pause();
-          setIsPlaying(false);
-        } else {
-          audioRef.current?.play()
-            .then(() => {
-              setIsPlaying(true);
-              setPlayAttempts(0);
-            })
-            .catch(error => {
-              console.error('Erro ao reproduzir áudio:', error);
-              setIsPlaying(false);
-            });
+            }
+          }, { once: true });
         }
       }
-    } catch (error) {
-      console.error('Erro ao alternar reprodução:', error);
-      setIsPlaying(false);
+    } else {
+      // Se clicou no mesmo áudio, apenas alterna play/pause
+      if (isPlaying) {
+        audioRef.current?.pause();
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+      } else {
+        if (audioRef.current && !isPlayingRef.current) {
+          isPlayingRef.current = true;
+          setIsPlaying(true);
+          audioRef.current.play().catch(() => {
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+          });
+        }
+      }
     }
   };
 
@@ -909,13 +932,16 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-4">
+      {/* Player Principal com Visualizador */}
       <div className="mb-4 bg-[#2d2d2d] rounded-lg border border-[#404040] overflow-hidden">
+        {/* Título do Áudio */}
         <div className="p-3 border-b border-[#404040]">
           <h3 className="text-[#e1aa1e] font-medium text-center">
             {currentAudio?.title || 'Selecione um áudio'}
           </h3>
         </div>
 
+        {/* Área do Visualizador */}
         <div className="relative h-32 bg-[#1e1e1e] p-4">
           <canvas
             ref={canvasRef}
@@ -924,6 +950,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             height={200}
           />
           
+          {/* Botão de Play centralizado */}
           <div className="absolute inset-0 flex items-center justify-center">
             <button
               onClick={() => {
@@ -966,6 +993,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           </div>
         </div>
 
+        {/* Controles e Progresso */}
         <div className="p-4 bg-[#1e1e1e]/50">
           <audio
             ref={audioRef}
@@ -977,6 +1005,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             className="hidden"
           />
 
+          {/* Barra de Progresso */}
           <div
             className="h-1 bg-[#404040] rounded-full cursor-pointer mb-2"
             onClick={handleProgressClick}
@@ -987,11 +1016,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             />
           </div>
 
+          {/* Tempo */}
           <div className="flex justify-between text-xs text-gray-400 mb-3">
             <span>{formatTime(audioRef.current?.currentTime || 0)}</span>
             <span>{formatTime(audioRef.current?.duration || 0)}</span>
           </div>
 
+          {/* Próxima Reprodução */}
           {(() => {
             const nextInfo = getNextAudioInfo();
             if (!nextInfo?.nextAudio) return null;
@@ -1014,11 +1045,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </div>
       </div>
 
+      {/* Cabeçalho da Lista */}
       <div className="mb-3 bg-[#2d2d2d] rounded-lg p-2 border border-[#404040] flex justify-between items-center">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400 px-2">Lista de Áudios</span>
         </div>
 
+        {/* Botão de Upload */}
         <div className="flex items-center">
           <label className="bg-[#e1aa1e] hover:bg-[#e1aa1e]/80 text-gray-900 px-3 py-1.5 rounded cursor-pointer transition-colors text-sm">
             {isUploading ? 'Enviando...' : 'Anexar Áudio'}
@@ -1033,6 +1066,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </div>
       </div>
 
+      {/* Lista de Áudios */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">
         <div className="text-xs text-gray-400 italic mb-2 px-2">
           Clique no ícone de edição ou dê um duplo clique no nome para renomear

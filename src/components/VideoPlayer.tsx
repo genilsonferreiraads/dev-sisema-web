@@ -10,31 +10,18 @@ interface VideoPlayerProps {
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlaying, pendingVideoId }) => {
-  const [newVideoUrl, setNewVideoUrl] = useState('');
   const [videos, setVideos] = useState<VideoData[]>([]);
-  const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
+  const [newVideoUrl, setNewVideoUrl] = useState('');
+  const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [player, setPlayer] = useState<YT.Player | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
+  const [player, setPlayer] = useState<any>(null);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
 
-  // Carregar vídeos ao montar o componente
   useEffect(() => {
     loadVideos();
   }, []);
-
-  const loadVideos = async () => {
-    try {
-      const data = await videoService.getVideos();
-      setVideos(data);
-      if (data.length > 0 && !selectedVideo) {
-        setSelectedVideo(data[0]);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar vídeos:', error);
-    }
-  };
 
   const loadYouTubeAPI = () => {
     return new Promise<void>((resolve) => {
@@ -53,7 +40,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
 
       (window as any).onYouTubeIframeAPIReady = () => {
-        console.log('API do YouTube pronta');
         resolve();
       };
     });
@@ -64,28 +50,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       await loadYouTubeAPI();
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      if (!(window as any).YT?.Player) {
-        console.warn('API do YouTube ainda não está pronta após carregamento');
-        return;
-      }
+      if (!(window as any).YT?.Player) return;
 
       const iframe = document.querySelector('#youtube-player');
       if (!iframe || player) return;
-
-      console.log('Inicializando player do YouTube...');
       
       try {
         const newPlayer = new (window as any).YT.Player('youtube-player', {
           events: {
             onReady: (event: any) => {
-              console.log('Player do YouTube pronto e inicializado');
               setPlayer(event.target);
               setIsPlayerReady(true);
               event.target.setVolume(100);
             },
             onStateChange: handleStateChange,
-            onError: (event: any) => {
-              console.error('Erro no player do YouTube:', event.data);
+            onError: () => {
+              // Mantém o erro silencioso
             }
           },
           playerVars: {
@@ -100,10 +80,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           }
         });
       } catch (error) {
-        console.error('Erro ao inicializar player:', error);
+        // Mantém o erro silencioso
       }
     } catch (error) {
-      console.error('Erro ao inicializar player:', error);
+      // Mantém o erro silencioso
     }
   };
 
@@ -117,6 +97,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       delete (window as any).onYouTubeIframeAPIReady;
     };
   }, []);
+
+  const loadVideos = async () => {
+    try {
+      const data = await videoService.getRecentVideos();
+      setVideos(data);
+    } catch (error) {
+      console.error('Erro ao carregar vídeos:', error);
+    }
+  };
 
   // Função para converter URL do YouTube em formato embed
   const getEmbedUrl = (url: string) => {
@@ -181,19 +170,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
   const handleAddVideo = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newVideoUrl.trim()) return;
-
+    setError('');
     setIsLoading(true);
-    setError(null);
+    
+    if (!newVideoUrl.trim()) {
+      setError('Por favor, insira uma URL válida');
+      setIsLoading(false);
+      return;
+    }
 
     try {
-      const video = await videoService.addVideo(newVideoUrl);
-      setVideos(prev => [video, ...prev]);
+      const embedUrl = getEmbedUrl(newVideoUrl);
+      const videoTitle = await getVideoTitle(newVideoUrl);
+      
+      const newVideo = await videoService.addVideo(embedUrl, videoTitle);
+      setVideos(prev => [newVideo, ...prev]);
       setNewVideoUrl('');
-      setSelectedVideo(video);
-    } catch (error) {
-      setError('Erro ao adicionar vídeo. Verifique a URL e tente novamente.');
-      console.error('Erro ao adicionar vídeo:', error);
+      setSelectedVideo(newVideo);
+    } catch (error: any) {
+      console.error('Erro detalhado:', error);
+      setError(
+        error.message || 
+        error.error_description || 
+        'Erro ao adicionar vídeo. Verifique se a URL é válida.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -222,10 +222,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   };
 
   const handleStateChange = (event: any) => {
-    console.log('Estado do vídeo mudou:', event.data);
-    
     if (event.data === 0) { // vídeo terminou
-      console.log('Vídeo terminou');
       setIsPlaying(false);
       // Dispara evento de fim
       window.dispatchEvent(new Event('externalMediaStop'));
@@ -234,7 +231,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       if (pendingVideoId) {
         const pendingVideo = videos.find(v => v.id === pendingVideoId);
         if (pendingVideo) {
-          console.log('Reproduzindo vídeo pendente:', pendingVideo.id);
           setSelectedVideo(pendingVideo);
           setIsPlaying(true);
         }
@@ -242,12 +238,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       
       onEnded();
     } else if (event.data === 1) { // vídeo começou a tocar
-      console.log('Vídeo começou a tocar');
       setIsPlaying(true);
       // Dispara evento de início
       window.dispatchEvent(new Event('externalMediaPlay'));
     } else if (event.data === 2) { // vídeo foi pausado
-      console.log('Vídeo pausado');
       setIsPlaying(false);
       // Dispara evento de fim
       window.dispatchEvent(new Event('externalMediaStop'));
@@ -301,20 +295,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   // Adicione este useEffect para escutar eventos de áudio
   useEffect(() => {
     const handleAudioPlay = () => {
-      console.log('Áudio começou a tocar, tentando diminuir volume do vídeo');
       if (isPlayerReady) {
         fadeIframeVolume(1, 0.10, 500);
-      } else {
-        console.log('Player não está pronto para ajustar volume');
       }
     };
 
     const handleAudioStop = () => {
-      console.log('Áudio parou, tentando restaurar volume do vídeo');
       if (isPlayerReady) {
         fadeIframeVolume(0.10, 1, 500);
-      } else {
-        console.log('Player não está pronto para ajustar volume');
       }
     };
 
@@ -330,7 +318,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   // Adicione um useEffect para reinicializar o player quando o vídeo mudar
   useEffect(() => {
     if (selectedVideo || videos[0]) {
-      console.log('Vídeo mudou, reinicializando player...');
       setPlayer(null);
       setIsPlayerReady(false);
       initializePlayer();
@@ -338,8 +325,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   }, [selectedVideo?.url, videos[0]?.url]);
 
   return (
-    <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-4">
-      <form onSubmit={handleAddVideo} className="mb-4">
+    <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3">
+      {/* Formulário de busca */}
+      <form onSubmit={handleAddVideo} className="mb-3">
         <div className="flex flex-col gap-2">
           <input
             type="url"
@@ -353,6 +341,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </div>
       </form>
 
+      {/* Botões de ação */}
       <div className="flex gap-2 mb-3">
         <button
           type="button"
@@ -402,6 +391,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </button>
       </div>
 
+      {/* Área do vídeo */}
       <div>
         {(selectedVideo || videos[0]) ? (
           <div className="rounded-lg overflow-hidden border border-[#404040]">
@@ -423,6 +413,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         )}
       </div>
 
+      {/* Menu lateral */}
       <VideoSidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
