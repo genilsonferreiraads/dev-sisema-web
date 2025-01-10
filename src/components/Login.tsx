@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { authService } from '../lib/auth';
+import logo from '../assets/Logo Site Império.png';
 
 interface LoginProps {
   onLoginSuccess: () => void;
@@ -105,12 +106,29 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      window.dispatchEvent(new Event('audioStop'));
+      window.dispatchEvent(new Event('videoStop'));
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await authService.signOut();
+      window.location.reload();
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#1e1e1e]">
       <div className={`bg-[#2d2d2d] p-8 rounded-lg shadow-lg w-96 border border-[#404040] ${isExiting ? 'login-exit' : 'login-enter'}`}>
         <div className="text-center mb-8 animate-slideDown">
-          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-[#e1aa1e]/10 flex items-center justify-center">
-            <span className="text-[#e1aa1e] text-3xl font-bold">IF</span>
+          <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-[#1e1e1e] flex items-center justify-center overflow-hidden 
+                        border border-[#404040]">
+            <img 
+              src={logo} 
+              alt="Império Fitness Logo" 
+              className="w-16 h-16 object-contain hover:scale-110 transition-transform duration-300 cursor-pointer"
+            />
           </div>
           <h2 className="text-2xl font-bold text-[#e1aa1e]">Império Fitness</h2>
           <p className="text-gray-400 text-sm mt-1">Área Restrita</p>

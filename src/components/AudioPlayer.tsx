@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { audioService, AudioData } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import '../styles/animations.css';
+import TextToSpeech from './TextToSpeech';
+import { config } from '../config';
 
 interface AudioTimer {
   interval: number;
@@ -17,6 +19,8 @@ interface AudioPlayerProps {
 }
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlaying }) => {
+  console.log('Env API Key:', process.env.REACT_APP_GOOGLE_API_KEY ? 'Presente' : 'Ausente');
+
   const [audios, setAudios] = useState<AudioData[]>([]);
   const [currentAudio, setCurrentAudio] = useState<AudioData | null>(null);
   const [progress, setProgress] = useState(0);
@@ -51,6 +55,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const animationRef = useRef<number | null>(null);
   const isPlayingRef = useRef(false);
   const endTimeRefs = useRef<Record<string, string>>({});
+  const [isTextToSpeechOpen, setIsTextToSpeechOpen] = useState(false);
+  const [isTextToSpeechSpeaking, setIsTextToSpeechSpeaking] = useState(false);
+
+  useEffect(() => {
+    console.log('Estado do TextToSpeech:', { isOpen: isTextToSpeechOpen, isSpeaking: isTextToSpeechSpeaking });
+  }, [isTextToSpeechOpen, isTextToSpeechSpeaking]);
 
   useEffect(() => {
     loadAudios();
@@ -1051,10 +1061,71 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           <span className="text-sm text-gray-400 px-2">Lista de Áudios</span>
         </div>
 
-        {/* Botão de Upload */}
-        <div className="flex items-center">
-          <label className="bg-[#e1aa1e] hover:bg-[#e1aa1e]/80 text-gray-900 px-3 py-1.5 rounded cursor-pointer transition-colors text-sm">
-            {isUploading ? 'Enviando...' : 'Anexar Áudio'}
+        {/* Botões de ação */}
+        <div className="flex items-center gap-2">
+          {/* Botão Falar Texto */}
+          <button
+            onClick={() => setIsTextToSpeechOpen(true)}
+            className={`
+              bg-[#2d2d2d] hover:bg-[#404040] text-[#e1aa1e] px-4 py-2 rounded  
+              flex items-center gap-2 transition-all duration-300 
+              border border-[#404040] hover:border-[#e1aa1e]
+              ${isTextToSpeechSpeaking ? 'button-speaking' : ''}
+            `}
+          >
+            <svg 
+              className={`w-4 h-4 transition-transform duration-300 ${
+                isTextToSpeechSpeaking ? 'icon-speaking' : ''
+              }`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" 
+              />
+            </svg>
+            <span className="text-sm flex items-center">
+              {isTextToSpeechSpeaking ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="whitespace-nowrap">Falando</span>
+                  <span className="speaking-dots">
+                    <span className="speaking-dot" />
+                    <span className="speaking-dot" />
+                    <span className="speaking-dot" />
+                  </span>
+                </span>
+              ) : (
+                'Falar Texto'
+              )}
+            </span>
+          </button>
+
+          {/* Botão Anexar Áudio */}
+          <label className={`
+            bg-[#2d2d2d] hover:bg-[#404040] text-[#e1aa1e] px-4 py-2 rounded 
+            flex items-center gap-2 transition-all duration-300 
+            border border-[#404040] hover:border-[#e1aa1e] cursor-pointer
+          `}>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            <span className="text-sm">
+              {isUploading ? 'Enviando...' : 'Anexar Áudio'}
+            </span>
             <input
               type="file"
               className="hidden"
@@ -1305,6 +1376,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           buttonPosition={deletePosition}
         />
       )}
+
+      <TextToSpeech
+        apiKey={config.googleApiKey}
+        isOpen={isTextToSpeechOpen}
+        onClose={() => {
+          console.log('Fechando TextToSpeech'); // Debug
+          setIsTextToSpeechOpen(false);
+        }}
+        onPlayingChange={(playing) => {
+          console.log('TextToSpeech playing changed:', playing); // Debug
+          setIsTextToSpeechSpeaking(playing);
+          if (playing && audioRef.current && isPlaying) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+          }
+        }}
+      />
     </div>
     
   );

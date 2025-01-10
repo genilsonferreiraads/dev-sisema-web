@@ -18,6 +18,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
   const [player, setPlayer] = useState<any>(null);
   const [isPlayerReady, setIsPlayerReady] = useState(false);
+  const [lastWatchedVideos, setLastWatchedVideos] = useState<string[]>(() => {
+    // Carrega o histórico do localStorage ao inicializar
+    const saved = localStorage.getItem('lastWatchedVideos');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [user] = useState(() => {
+    const userData = localStorage.getItem('user');
+    return userData ? JSON.parse(userData) : null;
+  });
+  const [isInternalStateChange, setIsInternalStateChange] = useState(false);
 
   useEffect(() => {
     loadVideos();
@@ -61,7 +71,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             onReady: (event: any) => {
               setPlayer(event.target);
               setIsPlayerReady(true);
-              event.target.setVolume(100);
+              
+              // Verifica se há áudio tocando ao inicializar
+              const audioElement = document.querySelector('audio');
+              const isAudioPlaying = audioElement && !audioElement.paused;
+              event.target.setVolume(isAudioPlaying ? 10 : 100);
             },
             onStateChange: handleStateChange,
             onError: () => {
@@ -101,13 +115,39 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const loadVideos = async () => {
     try {
       const data = await videoService.getRecentVideos();
-      setVideos(data);
+      
+      // Garante que temos um usuário antes de carregar o histórico
+      const userData = localStorage.getItem('user');
+      const user = userData ? JSON.parse(userData) : null;
+      
+      if (user?.id) {
+        // Carrega o último vídeo assistido
+        const lastVideoId = await videoService.getLastWatchedVideo(user.id);
+        
+        if (lastVideoId) {
+          const lastVideo = data.find(v => v.id === lastVideoId);
+          if (lastVideo) {
+            setSelectedVideo(lastVideo);
+            setVideos([lastVideo, ...data.filter(v => v.id !== lastVideoId)]);
+          } else {
+            setVideos(data);
+          }
+        } else {
+          setVideos(data);
+        }
+
+        // Carrega o histórico completo
+        const history = await videoService.getVideoHistory(user.id);
+        setLastWatchedVideos(history);
+      } else {
+        setVideos(data);
+      }
     } catch (error) {
       console.error('Erro ao carregar vídeos:', error);
+      setVideos([]);
     }
   };
 
-  // Função para converter URL do YouTube em formato embed
   const getEmbedUrl = (url: string) => {
     console.log('URL original:', url);
     try {
@@ -133,7 +173,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }
   };
 
-  // Função para extrair título do vídeo do YouTube
   const getVideoTitle = async (url: string): Promise<string> => {
     try {
       if (url.includes('youtube.com') || url.includes('youtu.be')) {
@@ -142,7 +181,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           : url.split('youtu.be/')[1]?.split('?')[0];
         
         const response = await fetch(
-          `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=AIzaSyAyTc_jYQSVM_3kg95t8ai3CWckZGG0v4c&part=snippet`
+          `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${process.env.REACT_APP_YOUTUBE_API_KEY}&part=snippet`
         );
         const data = await response.json();
         
@@ -208,70 +247,74 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }
   };
 
-  const handleVideoSelect = (video: VideoData) => {
+  const handleVideoSelect = async (video: VideoData) => {
+    setIsInternalStateChange(true);
+    
     setSelectedVideo(video);
     setIsSidebarOpen(false);
-  };
+    
+    // Verifica se há áudio tocando
+    const audioElement = document.querySelector('audio');
+    const isAudioPlaying = audioElement && !audioElement.paused;
 
-  const handlePlayerReady = (event: any) => {
-    console.log('Player pronto');
-    if (isPlaying) {
-      console.log('Iniciando reprodução automática');
-      event.target.playVideo();
+    // Se houver áudio tocando, já inicia com volume baixo
+    if (isAudioPlaying && player && isPlayerReady) {
+      player.setVolume(10);
+    } else if (player && isPlayerReady) {
+      player.setVolume(100);
     }
+
+    // Inicia o vídeo sem disparar eventos externos
+    if (player && isPlayerReady) {
+      try {
+        await player.playVideo();
+      } catch (error) {
+        console.error('Erro ao iniciar vídeo:', error);
+      }
+    }
+    
+    if (user?.id) {
+      await videoService.saveVideoHistory(user.id, video.id);
+      
+      setLastWatchedVideos(prev => {
+        const newOrder = [video.id, ...prev.filter(id => id !== video.id)];
+        return newOrder.slice(0, videos.length);
+      });
+
+      setVideos(prev => [
+        video,
+        ...prev.filter(v => v.id !== video.id)
+      ]);
+    }
+
+    // Reset o flag após um curto delay
+    setTimeout(() => {
+      setIsInternalStateChange(false);
+    }, 100);
   };
 
   const handleStateChange = (event: any) => {
+    if (isInternalStateChange) return;
+
     if (event.data === 0) { // vídeo terminou
-      setIsPlaying(false);
-      // Dispara evento de fim
-      window.dispatchEvent(new Event('externalMediaStop'));
-      
-      // Se houver um vídeo pendente, seleciona ele
       if (pendingVideoId) {
         const pendingVideo = videos.find(v => v.id === pendingVideoId);
         if (pendingVideo) {
           setSelectedVideo(pendingVideo);
-          setIsPlaying(true);
         }
       }
-      
       onEnded();
     } else if (event.data === 1) { // vídeo começou a tocar
-      setIsPlaying(true);
-      // Dispara evento de início
-      window.dispatchEvent(new Event('externalMediaPlay'));
-    } else if (event.data === 2) { // vídeo foi pausado
-      setIsPlaying(false);
-      // Dispara evento de fim
-      window.dispatchEvent(new Event('externalMediaStop'));
-    }
-  };
-
-  // Função para extrair videoId do YouTube
-  const extractVideoId = (url: string = '') => {
-    try {
-      if (!url) return '';
+      // Apenas ajusta o volume se necessário
+      const audioElement = document.querySelector('audio');
+      const isAudioPlaying = audioElement && !audioElement.paused;
       
-      let videoId = '';
-      
-      if (url.includes('youtube.com/embed/')) {
-        videoId = url.split('embed/')[1]?.split('?')[0];
-      } else if (url.includes('youtube.com/watch')) {
-        videoId = url.split('v=')[1]?.split('&')[0];
-      } else if (url.includes('youtu.be/')) {
-        videoId = url.split('youtu.be/')[1]?.split('?')[0];
+      if (isAudioPlaying && player) {
+        player.setVolume(10);
       }
-
-      console.log('Extraído videoId:', videoId, 'da URL:', url);
-      return videoId;
-    } catch (error) {
-      console.error('Erro ao extrair videoId:', error);
-      return '';
     }
   };
 
-  // Adicione esta função para controlar o fade do volume do iframe
   const fadeIframeVolume = (start: number, end: number, duration: number) => {
     if (!player || !isPlayerReady) return;
 
@@ -292,7 +335,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }, stepDuration);
   };
 
-  // Adicione este useEffect para escutar eventos de áudio
   useEffect(() => {
     const handleAudioPlay = () => {
       if (isPlayerReady) {
@@ -315,7 +357,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     };
   }, [isPlayerReady]);
 
-  // Adicione um useEffect para reinicializar o player quando o vídeo mudar
   useEffect(() => {
     if (selectedVideo || videos[0]) {
       setPlayer(null);
@@ -324,9 +365,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }
   }, [selectedVideo?.url, videos[0]?.url]);
 
+  useEffect(() => {
+    if (!player || !isPlayerReady) return;
+
+    if (isPlaying) {
+      player.playVideo();
+    } else {
+      const audioElement = document.querySelector('audio');
+      const isAudioPlaying = audioElement && !audioElement.paused;
+      
+      if (!isAudioPlaying) {
+        player.pauseVideo();
+      }
+    }
+  }, [isPlaying, player, isPlayerReady]);
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3">
-      {/* Formulário de busca */}
       <form onSubmit={handleAddVideo} className="mb-3">
         <div className="flex flex-col gap-2">
           <input
@@ -341,7 +396,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </div>
       </form>
 
-      {/* Botões de ação */}
       <div className="flex gap-2 mb-3">
         <button
           type="button"
@@ -391,7 +445,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </button>
       </div>
 
-      {/* Área do vídeo */}
       <div>
         {(selectedVideo || videos[0]) ? (
           <div className="rounded-lg overflow-hidden border border-[#404040]">
@@ -413,15 +466,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         )}
       </div>
 
-      {/* Menu lateral */}
       <VideoSidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         videos={videos}
         onVideoSelect={handleVideoSelect}
+        lastWatchedVideos={lastWatchedVideos}
       />
     </div>
   );
 };
 
-export default VideoPlayer; 
+export default VideoPlayer;

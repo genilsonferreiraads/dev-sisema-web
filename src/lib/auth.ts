@@ -69,6 +69,7 @@ export const authService = {
 
   async signOut() {
     localStorage.removeItem('user');
+    await supabase.auth.signOut();
   },
 
   async changePassword(username: string, adminPassword: string, newPassword: string): Promise<boolean> {

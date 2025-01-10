@@ -41,4 +41,105 @@
 
 .login-exit {
   animation: fadeOutUp 0.5s ease-out forwards;
+}
+
+@keyframes wave {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.animate-wave {
+  animation: wave 2s ease-in-out infinite;
+}
+
+.animation-delay-150 {
+  animation-delay: 150ms;
+}
+
+.animation-delay-300 {
+  animation-delay: 300ms;
+}
+
+.delay-0 {
+  animation-delay: 0ms;
+}
+
+.delay-150 {
+  animation-delay: 150ms;
+}
+
+.delay-300 {
+  animation-delay: 300ms;
+}
+
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-4px); }
+}
+
+@keyframes iconPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.speaking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  height: 16px;
+}
+
+.speaking-dot {
+  width: 3px;
+  height: 3px;
+  background-color: #e1aa1e;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.speaking-dot:nth-child(1) { 
+  animation: dotBounce 1s ease-in-out infinite;
+  animation-delay: -0.32s;
+}
+
+.speaking-dot:nth-child(2) { 
+  animation: dotBounce 1s ease-in-out infinite;
+  animation-delay: -0.16s;
+}
+
+.speaking-dot:nth-child(3) { 
+  animation: dotBounce 1s ease-in-out infinite;
+}
+
+.button-speaking {
+  background-color: rgba(225, 170, 30, 0.1) !important;
+  border-color: #e1aa1e !important;
+  animation: buttonGlow 1.5s ease-in-out infinite !important;
+}
+
+@keyframes buttonGlow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(225, 170, 30, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(225, 170, 30, 0.5);
+  }
+}
+
+.icon-speaking {
+  animation: iconPulse 2s ease-in-out infinite;
+}
+
+@keyframes buttonPulse {
+  0%, 100% {
+    background-color: rgba(225, 170, 30, 0.1);
+  }
+  50% {
+    background-color: rgba(225, 170, 30, 0.2);
+  }
 } 

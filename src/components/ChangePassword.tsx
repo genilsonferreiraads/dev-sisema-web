@@ -24,6 +24,7 @@ const ChangePassword: React.FC<ChangePasswordProps> = ({ username, onClose, isAd
     }
 
     setError(null);
+    setSuccess(false);
 
     if (newPassword !== confirmPassword) {
       setError('As senhas não coincidem');
@@ -43,10 +44,12 @@ const ChangePassword: React.FC<ChangePasswordProps> = ({ username, onClose, isAd
         setSuccess(true);
         setTimeout(onClose, 2000);
       } else {
-        setError('Senha atual incorreta');
+        setError('Não foi possível alterar a senha. Verifique suas credenciais.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao alterar senha');
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao alterar senha';
+      console.error('Erro ao alterar senha:', err);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -137,4 +140,4 @@ const ChangePassword: React.FC<ChangePasswordProps> = ({ username, onClose, isAd
   );
 };
 
-export default ChangePassword; 
+export default ChangePassword;

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User } from '../types/auth';
 import { authService } from '../lib/auth';
 import UserSettings from './UserSettings';
+import logo from '../assets/Logo Site Império.png';
 
 interface HeaderProps {
   user: User | null;
@@ -9,7 +10,7 @@ interface HeaderProps {
   onUserUpdate: () => Promise<void>;
 }
 
-const Header: React.FC<HeaderProps> = ({ user, onLogout, onUserUpdate }) => {
+export const Header: React.FC<HeaderProps> = ({ user, onLogout, onUserUpdate }) => {
   const [showSettings, setShowSettings] = useState(false);
 
   const handleLogout = async () => {
@@ -27,10 +28,17 @@ const Header: React.FC<HeaderProps> = ({ user, onLogout, onUserUpdate }) => {
     <header className="bg-[#1e1e1e] shadow-lg fixed w-full top-0 z-50 border-b border-[#404040]">
       <div className="container mx-auto px-4 py-4 md:py-6">
         <div className="flex flex-col md:flex-row items-center relative">
-          {/* Nome da academia */}
-          <h1 className="text-2xl md:text-3xl font-extrabold text-[#e1aa1e] transition-transform duration-300 hover:scale-105 cursor-pointer mb-3 md:mb-0 md:absolute md:left-1/2 md:transform md:-translate-x-1/2">
-            Academia Império Fitness
-          </h1>
+          {/* Logo e Nome da academia */}
+          <div className="flex items-center gap-3 mb-3 md:mb-0 md:absolute md:left-1/2 md:transform md:-translate-x-1/2 group hover:scale-105 transition-transform duration-300 cursor-pointer">
+            <h1 className="text-2xl md:text-3xl font-extrabold text-[#e1aa1e]">
+              Academia Império Fitness
+            </h1>
+            <img 
+              src={logo} 
+              alt="Logo Academia Império Fitness" 
+              className="w-10 h-10 md:w-12 md:h-12 object-contain"
+            />
+          </div>
           
           {/* Botões e saudação */}
           {userData && (

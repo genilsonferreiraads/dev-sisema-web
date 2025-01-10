@@ -26,6 +26,8 @@ export interface VideoData {
   url: string;
   title?: string;
   created_at: string;
+  play_order?: number;
+  last_played?: string;
 }
 
 export const audioService = {
@@ -135,56 +137,280 @@ export const audioService = {
     }
     
     return data;
+  },
+
+  updateAudioTitle: async (audioId: string, title: string) => {
+    const { data, error } = await supabase
+      .from('audios')
+      .update({ title })
+      .eq('id', audioId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  updateAudioPreferences: async (audioId: string, preferences: any) => {
+    const { data, error } = await supabase
+      .from('audio_preferences')
+      .upsert({
+        audio_id: audioId,
+        ...preferences
+      })
+      .single();
+
+    if (error) throw error;
+    return data;
   }
 };
 
+interface UserVideoHistory {
+  user_id: string;
+  video_id: string;
+  last_watched: Date;
+  watch_order: number;
+}
+
 export const videoService = {
-  async getRecentVideos() {
-    const { data, error } = await supabase
-      .from('videos')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(20);
-    
-    if (error) {
-      throw new Error(`Erro ao buscar vídeos: ${error.message}`);
+  async updateVideoOrder(videoId: string): Promise<void> {
+    try {
+      // 1. Primeiro, pega todos os vídeos ordenados
+      const { data: allVideos } = await supabase
+        .from('videos')
+        .select('id, play_order')
+        .order('play_order', { ascending: false });
+
+      if (!allVideos) return;
+
+      // 2. Encontra o vídeo atual e sua posição
+      const currentVideo = allVideos.find(v => v.id === videoId);
+      if (!currentVideo) return;
+
+      // 3. Atualiza a ordem dos vídeos em lote
+      const updates = allVideos.map((video, index) => {
+        if (video.id === videoId) {
+          // Vídeo selecionado vai para o topo
+          return {
+            id: video.id,
+            play_order: allVideos.length,
+            last_played: new Date().toISOString()
+          };
+        } else if (video.play_order > currentVideo.play_order) {
+          // Vídeos acima do selecionado mantêm sua posição
+          return {
+            id: video.id,
+            play_order: video.play_order
+          };
+        } else {
+          // Vídeos abaixo do selecionado descem uma posição
+          return {
+            id: video.id,
+            play_order: (video.play_order || 0) - 1
+          };
+        }
+      });
+
+      // 4. Executa as atualizações
+      for (const update of updates) {
+        await supabase
+          .from('videos')
+          .update({ 
+            play_order: update.play_order,
+            ...(update.last_played ? { last_played: update.last_played } : {})
+          })
+          .eq('id', update.id);
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar ordem do vídeo:', error);
+      throw error;
     }
-    return data as VideoData[];
   },
 
-  async addVideo(url: string, title: string) {
-    if (!url) {
-      throw new Error('URL não pode estar vazia');
+  async addVideo(url: string, title: string): Promise<VideoData> {
+    try {
+      // 1. Primeiro, incrementa a ordem de todos os vídeos existentes
+      const { data: existingVideos } = await supabase
+        .from('videos')
+        .select('id, play_order')
+        .order('play_order', { ascending: false });
+
+      if (existingVideos) {
+        for (const video of existingVideos) {
+          await supabase
+            .from('videos')
+            .update({ play_order: (video.play_order || 0) - 1 })
+            .eq('id', video.id);
+        }
+      }
+
+      // 2. Adiciona o novo vídeo com a maior ordem
+      const { data, error } = await supabase
+        .from('videos')
+        .insert([
+          { 
+            url, 
+            title, 
+            play_order: existingVideos?.length || 0,
+            last_played: new Date().toISOString()
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Erro ao adicionar vídeo:', error);
+      throw error;
     }
-    
-    const { data, error } = await supabase
-      .from('videos')
-      .insert([{ url, title }])
-      .select()
-      .single();
-    
-    if (error) {
-      throw new Error(
-        error.message || 
-        'Erro ao adicionar vídeo no banco de dados'
+  },
+
+  async deleteVideo(id: string): Promise<void> {
+    try {
+      // Primeiro, pega a ordem do vídeo que será deletado e todos os vídeos
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('id, play_order')
+        .order('play_order', { ascending: false });
+
+      const videoToDelete = videos?.find(v => v.id === id);
+      if (!videoToDelete) return;
+
+      const deletedOrder = videoToDelete.play_order || 0;
+
+      // Deleta o vídeo
+      const { error: deleteError } = await supabase
+        .from('videos')
+        .delete()
+        .eq('id', id);
+
+      if (deleteError) throw deleteError;
+
+      // Atualiza a ordem dos vídeos que estavam depois do vídeo deletado
+      const videosToUpdate = videos?.filter(v => 
+        v.id !== id && 
+        (v.play_order || 0) < deletedOrder
       );
-    }
 
-    if (!data) {
-      throw new Error('Nenhum dado retornado após inserção');
+      // Atualiza cada vídeo individualmente
+      for (const video of videosToUpdate || []) {
+        await supabase
+          .from('videos')
+          .update({ play_order: (video.play_order || 0) + 1 })
+          .eq('id', video.id);
+      }
+    } catch (error) {
+      console.error('Erro ao deletar vídeo:', error);
+      throw error;
     }
-
-    return data as VideoData;
   },
 
-  async deleteVideo(id: string) {
-    const { error } = await supabase
-      .from('videos')
-      .delete()
-      .eq('id', id);
-    
-    if (error) {
-      throw new Error(`Erro ao deletar vídeo: ${error.message}`);
+  async getRecentVideos(): Promise<VideoData[]> {
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .order('play_order', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Erro ao buscar vídeos:', error);
+      throw error;
+    }
+  },
+
+  async saveVideoHistory(userId: string, videoId: string): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      
+      // Tenta atualizar se existir
+      const { data: existingData, error: checkError } = await supabase
+        .from('user_video_history')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('video_id', videoId)
+        .single();
+
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.error('Erro ao verificar histórico:', checkError);
+        return;
+      }
+
+      if (existingData?.id) {
+        const { error: updateError } = await supabase
+          .from('user_video_history')
+          .update({
+            last_watched: now,
+            watch_order: 0
+          })
+          .eq('id', existingData.id);
+
+        if (updateError) {
+          console.error('Erro ao atualizar histórico:', updateError);
+          return;
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('user_video_history')
+          .insert([{
+            user_id: userId,
+            video_id: videoId,
+            last_watched: now,
+            watch_order: 0
+          }]);
+
+        if (insertError) {
+          console.error('Erro ao inserir histórico:', insertError);
+          return;
+        }
+      }
+
+      // Tenta reordenar o histórico e trata possíveis erros
+      const { error: reorderError } = await supabase
+        .rpc('reorder_video_history', { p_user_id: userId });
+
+      if (reorderError) {
+        console.error('Erro ao reordenar histórico:', reorderError);
+        // Não retorna aqui, pois o registro principal já foi salvo
+      }
+
+    } catch (error) {
+      console.error('Erro ao salvar histórico:', error);
+    }
+  },
+
+  async getVideoHistory(userId: string): Promise<string[]> {
+    try {
+      const { data, error } = await supabase
+        .from('user_video_history')
+        .select('video_id')
+        .eq('user_id', userId)
+        .order('watch_order', { ascending: true })
+        .order('last_watched', { ascending: false });
+
+      if (error) throw error;
+      return data?.map(h => h.video_id) || [];
+    } catch (error) {
+      console.error('Erro ao carregar histórico:', error);
+      return [];
+    }
+  },
+
+  async getLastWatchedVideo(userId: string): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('user_video_history')
+        .select('video_id')
+        .eq('user_id', userId)
+        .order('last_watched', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+      return data?.[0]?.video_id || null;
+    } catch (error) {
+      console.error('Erro ao carregar último vídeo:', error);
+      return null;
     }
   }
 }; 
