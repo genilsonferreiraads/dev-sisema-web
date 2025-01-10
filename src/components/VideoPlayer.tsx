@@ -10,6 +10,8 @@ interface VideoPlayerProps {
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlaying, pendingVideoId }) => {
+  console.log('YouTube API Key:', process.env.REACT_APP_YOUTUBE_API_KEY ? 'Presente' : 'Ausente');
+  
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [error, setError] = useState<string>('');
@@ -179,18 +181,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         const videoId = url.includes('youtube.com')
           ? url.split('v=')[1]?.split('&')[0]
           : url.split('youtu.be/')[1]?.split('?')[0];
-        
-        const response = await fetch(
-          `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${process.env.REACT_APP_YOUTUBE_API_KEY}&part=snippet`
-        );
-        const data = await response.json();
-        
-        if (data.error) {
-          console.error('Erro da API do YouTube:', data.error);
+
+        // Verifica se a chave da API está presente
+        const apiKey = process.env.REACT_APP_YOUTUBE_API_KEY;
+        if (!apiKey) {
+          console.error('API key não encontrada:', process.env.REACT_APP_YOUTUBE_API_KEY);
           return 'Vídeo do YouTube';
         }
 
-        return data.items[0]?.snippet?.title || 'Vídeo do YouTube';
+        const response = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${apiKey}&part=snippet`
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Erro na requisição:', errorData);
+          return 'Vídeo do YouTube';
+        }
+
+        const data = await response.json();
+        
+        if (!data.items || data.items.length === 0) {
+          console.error('Nenhum item encontrado para o ID:', videoId);
+          return 'Vídeo do YouTube';
+        }
+
+        const title = data.items[0]?.snippet?.title;
+        if (!title) {
+          console.error('Título não encontrado no snippet');
+          return 'Vídeo do YouTube';
+        }
+
+        return title;
       }
       
       if (url.includes('vimeo.com')) {
@@ -203,7 +225,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       return 'Vídeo';
     } catch (error) {
       console.error('Erro ao obter título do vídeo:', error);
-      return 'Vídeo';
+      return 'Vídeo do YouTube';
     }
   };
 
@@ -223,9 +245,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       const videoTitle = await getVideoTitle(newVideoUrl);
       
       const newVideo = await videoService.addVideo(embedUrl, videoTitle);
+      
+      // Atualiza a lista de vídeos mantendo o novo vídeo no topo
       setVideos(prev => [newVideo, ...prev]);
       setNewVideoUrl('');
       setSelectedVideo(newVideo);
+
+      // Atualiza o histórico se houver usuário
+      if (user?.id) {
+        await videoService.saveVideoHistory(user.id, newVideo.id);
+        setLastWatchedVideos(prev => [newVideo.id, ...prev]);
+      }
+
     } catch (error: any) {
       console.error('Erro detalhado:', error);
       setError(

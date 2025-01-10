@@ -228,7 +228,21 @@ export const videoService = {
 
   async addVideo(url: string, title: string): Promise<VideoData> {
     try {
-      // 1. Primeiro, incrementa a ordem de todos os vídeos existentes
+      // Primeiro, verifica se o vídeo já existe
+      const { data: existingVideo } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('url', url)
+        .single();
+
+      // Se o vídeo já existe, retorna ele
+      if (existingVideo) {
+        // Atualiza a ordem apenas do vídeo existente
+        await videoService.updateVideoOrder(existingVideo.id);
+        return existingVideo;
+      }
+
+      // Se não existe, continua com a adição do novo vídeo
       const { data: existingVideos } = await supabase
         .from('videos')
         .select('id, play_order')
@@ -243,21 +257,23 @@ export const videoService = {
         }
       }
 
-      // 2. Adiciona o novo vídeo com a maior ordem
+      // Adiciona o novo vídeo com a maior ordem
       const { data, error } = await supabase
         .from('videos')
-        .insert([
-          { 
-            url, 
-            title, 
-            play_order: existingVideos?.length || 0,
-            last_played: new Date().toISOString()
-          }
-        ])
+        .insert([{ 
+          url, 
+          title, 
+          play_order: existingVideos?.length || 0,
+          last_played: new Date().toISOString()
+        }])
         .select()
         .single();
 
       if (error) throw error;
+
+      // Limpa vídeos antigos após adicionar o novo
+      await videoService.cleanOldVideos();
+
       return data;
     } catch (error) {
       console.error('Erro ao adicionar vídeo:', error);
@@ -412,5 +428,43 @@ export const videoService = {
       console.error('Erro ao carregar último vídeo:', error);
       return null;
     }
-  }
+  },
+
+  async cleanOldVideos(): Promise<void> {
+    try {
+      // Primeiro, pega todos os vídeos ordenados por data
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('id')
+        .order('created_at', { ascending: false });
+
+      if (!videos || videos.length <= 30) return; // Se tiver 30 ou menos vídeos, não precisa limpar
+
+      // Pega os IDs dos vídeos que devem ser removidos (a partir do 31º)
+      const videosToDelete = videos.slice(30).map(video => video.id);
+
+      // Primeiro, remove os registros relacionados no histórico
+      const { error: historyError } = await supabase
+        .from('user_video_history')
+        .delete()
+        .in('video_id', videosToDelete);
+
+      if (historyError) {
+        console.error('Erro ao limpar histórico de vídeos:', historyError);
+        return;
+      }
+
+      // Depois remove os vídeos
+      const { error } = await supabase
+        .from('videos')
+        .delete()
+        .in('id', videosToDelete);
+
+      if (error) {
+        console.error('Erro ao limpar vídeos antigos:', error);
+      }
+    } catch (error) {
+      console.error('Erro ao limpar vídeos antigos:', error);
+    }
+  },
 }; 

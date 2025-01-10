@@ -56,11 +56,26 @@ const VideoSidebar: React.FC<VideoSidebarProps> = ({
     onClose();
   };
 
-  // Função para ordenar os vídeos baseado no histórico
+  // Função para ordenar os vídeos baseado no histórico e remover duplicatas
   const sortedVideos = React.useMemo(() => {
-    if (!lastWatchedVideos.length) return videos;
+    const MAX_VIDEOS = 30; // Alterado para 30 vídeos
 
-    return [...videos].sort((a, b) => {
+    if (!lastWatchedVideos.length) {
+      // Remove duplicatas da lista original usando a URL como chave
+      const uniqueVideos = videos.filter((video, index, self) =>
+        index === self.findIndex((v) => v.url === video.url)
+      );
+      // Retorna apenas os 30 últimos vídeos
+      return uniqueVideos.slice(0, MAX_VIDEOS);
+    }
+
+    // Primeiro remove as duplicatas
+    const uniqueVideos = videos.filter((video, index, self) =>
+      index === self.findIndex((v) => v.url === video.url)
+    );
+
+    // Depois ordena baseado no histórico
+    const orderedVideos = [...uniqueVideos].sort((a, b) => {
       const indexA = lastWatchedVideos.indexOf(a.id);
       const indexB = lastWatchedVideos.indexOf(b.id);
       
@@ -70,6 +85,9 @@ const VideoSidebar: React.FC<VideoSidebarProps> = ({
       
       return indexA - indexB;
     });
+
+    // Retorna apenas os 30 primeiros vídeos
+    return orderedVideos.slice(0, MAX_VIDEOS);
   }, [videos, lastWatchedVideos]);
 
   return (
@@ -112,45 +130,42 @@ const VideoSidebar: React.FC<VideoSidebarProps> = ({
               return (
                 <div
                   key={video.id}
-                  className="flex gap-2 p-2 hover:bg-[#2d2d2d] cursor-pointer rounded-lg mb-2 group"
+                  className="p-2 hover:bg-[#2d2d2d] cursor-pointer rounded-lg mb-2 group transition-all duration-300 hover:border-[#e1aa1e] border border-transparent"
                   onClick={() => handleVideoSelect(video)}
                 >
-                  {thumbnail ? (
-                    <img
-                      src={thumbnail}
-                      alt={video.title || 'Thumbnail do vídeo'}
-                      className="w-32 h-20 object-cover rounded border border-[#404040]"
-                    />
-                  ) : (
-                    <div className="w-32 h-20 bg-[#2d2d2d] rounded border border-[#404040] flex items-center justify-center">
-                      <svg
-                        className="w-8 h-8 text-gray-400"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[#e1aa1e] truncate group-hover:text-[#e1aa1e]/80">
-                      {video.title || 'Vídeo sem título'}
-                    </p>
-                    <p className="text-xs text-gray-400 truncate">
-                      {new Date(video.created_at).toLocaleDateString()}
-                    </p>
+                  <p className="text-sm font-medium text-white mb-1.5 break-words group-hover:text-white px-1 transition-colors duration-300">
+                    {video.title || 'Vídeo sem título'}
+                  </p>
+                  <div className="flex justify-center overflow-hidden rounded-lg">
+                    {thumbnail ? (
+                      <img
+                        src={thumbnail}
+                        alt={video.title || 'Thumbnail do vídeo'}
+                        className="w-full max-w-[280px] h-[157px] object-cover border border-[#404040] flex-shrink-0 transition-transform duration-300 group-hover:scale-105 group-hover:border-[#e1aa1e]"
+                      />
+                    ) : (
+                      <div className="w-full max-w-[280px] h-[157px] bg-[#2d2d2d] border border-[#404040] flex items-center justify-center flex-shrink-0 transition-all duration-300 group-hover:border-[#e1aa1e]">
+                        <svg
+                          className="w-8 h-8 text-gray-400 transition-colors duration-300 group-hover:text-[#e1aa1e]"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@tailwindcss/line-clamp": "^0.4.4",
     "@types/react-icons": "^2.2.7"
   }
 }
