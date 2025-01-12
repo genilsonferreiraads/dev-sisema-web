@@ -1,0 +1,44 @@
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #1e1e1e;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #e1aa1e;
+}
+
+/* Para Firefox */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #404040 #1e1e1e;
+} 
+
+.autocomplete-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.autocomplete-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.autocomplete-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.autocomplete-item:hover {
+  background-color: rgba(225, 170, 30, 0.1);
+} 

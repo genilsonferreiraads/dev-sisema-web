@@ -273,6 +273,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   };
 
   const handleAudioEnd = () => {
+    isPlayingRef.current = false;
+    setIsPlaying(false);
     if (onEnded) {
       onEnded();
     }
@@ -285,8 +287,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       if (audioRef.current) {
         audioRef.current.pause();
         isPlayingRef.current = false;
+        setIsPlaying(false);
       }
-      // Apenas define o novo áudio
+      // Define o novo áudio
       setCurrentAudio(audio);
       
       // Se não tiver timer ativo, inicia a reprodução manualmente
@@ -309,13 +312,20 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
     } else {
-      // Se clicou no mesmo áudio, apenas alterna play/pause
-      if (isPlaying) {
-        audioRef.current?.pause();
-        isPlayingRef.current = false;
-        setIsPlaying(false);
+      // Se clicou no mesmo áudio
+      if (isPlayingRef.current) {
+        if (audioRef.current) {
+          audioRef.current.pause();
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+        }
       } else {
-        if (audioRef.current && !isPlayingRef.current) {
+        if (audioRef.current) {
+          // Se o áudio terminou, volta para o início
+          if (audioRef.current.ended) {
+            audioRef.current.currentTime = 0;
+          }
+          
           isPlayingRef.current = true;
           setIsPlaying(true);
           audioRef.current.play().catch(() => {
@@ -952,7 +962,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </div>
 
         {/* Área do Visualizador */}
-        <div className="relative h-32 bg-[#1e1e1e] p-4">
+        <div className="relative h-32 bg-[#1e1e1e] p-4 overflow-hidden">
           <canvas
             ref={canvasRef}
             className="absolute inset-0 w-full h-full"
@@ -960,46 +970,58 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             height={200}
           />
           
-          {/* Botão de Play centralizado */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <button
-              onClick={() => {
-                if (currentAudio) {
-                  setIsPlaying(!isPlaying);
-                  if (isPlaying) {
-                    audioRef.current?.pause();
-                  } else {
-                    audioRef.current?.play();
+          {/* Container das ondas e botão */}
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+            <div className="relative w-full h-full flex items-center justify-center">
+              {/* Círculos de animação */}
+              {isPlaying && (
+                <>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    {/* Ondas se expandindo */}
+                    <div className="animate-wave-1 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-2 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-3 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-4 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-5 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-6 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                  </div>
+                </>
+              )}
+              {/* Botão de Play */}
+              <button
+                onClick={() => {
+                  if (currentAudio) {
+                    togglePlay(currentAudio);
                   }
-                }
-              }}
-              className={`p-4 rounded-full bg-[#e1aa1e]/90 hover:bg-[#e1aa1e] transition-all transform 
-                hover:scale-105 active:scale-95 ${isPlaying ? 'animate-pulse' : ''}`}
-              disabled={!currentAudio}
-            >
-              <svg
-                className="w-8 h-8 text-gray-900"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+                }}
+                className={`relative z-10 p-4 rounded-full bg-[#e1aa1e] hover:bg-[#e1aa1e]/90 transition-all transform 
+                  hover:scale-105 active:scale-95 shadow-lg ${isPlaying ? 'ring-4 ring-[#e1aa1e]/50 animate-glow' : ''}`}
+                disabled={!currentAudio}
               >
-                {isPlaying ? (
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2.5}
-                    d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                ) : (
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2.5}
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                )}
-              </svg>
-            </button>
+                <svg
+                  className="w-8 h-8 text-gray-900"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {isPlaying ? (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  ) : (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  )}
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 

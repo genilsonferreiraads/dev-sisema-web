@@ -8,14 +8,13 @@ interface TextToSpeechProps {
 }
 
 const TextToSpeech: React.FC<TextToSpeechProps> = ({ apiKey, isOpen, onClose, onPlayingChange }) => {
-  console.log('API Key recebida:', apiKey ? 'Presente' : 'Ausente', 'Comprimento:', apiKey?.length);
-
   const [text, setText] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastGeneratedText, setLastGeneratedText] = useState<string>('');
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -81,6 +80,7 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({ apiKey, isOpen, onClose, on
 
     if (!apiKey) {
       setError('Chave da API não configurada');
+      console.log('API Key não encontrada');
       return;
     }
 
@@ -141,12 +141,11 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({ apiKey, isOpen, onClose, on
 
       await setupAudioElement(url);
       if (audioRef.current) {
-        console.log('Iniciando reprodução');
         await audioRef.current.play();
         notifyAudioStart();
       }
     } catch (err) {
-      console.error('Erro detalhado:', err);
+      console.error('Erro ao gerar áudio:', err);
       setError(err instanceof Error ? err.message : 'Erro ao gerar áudio. Tente novamente.');
       setLastGeneratedText('');
       setAudioUrl(null);
@@ -232,8 +231,18 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({ apiKey, isOpen, onClose, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="max-w-2xl w-full mx-4 animate-fadeIn">
+    <div 
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn"
+      onClick={handleClose}
+    >
+      <div 
+        className="max-w-2xl w-full mx-4 animate-modalExpand"
+        onClick={e => e.stopPropagation()}
+        style={{ 
+          transformOrigin: 'center 110%',
+          perspective: '1000px'
+        }}
+      >
         <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg overflow-hidden border border-[#404040]/30">
           <div className="bg-gradient-to-r from-[#2d2d2d] to-[#262626] px-6 py-4 border-b border-[#404040] flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -255,8 +264,11 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({ apiKey, isOpen, onClose, on
               </h2>
             </div>
             <button
-              onClick={handleClose}
-              className="text-gray-400 hover:text-gray-200 transition-all duration-300 hover:rotate-90"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="text-gray-400 hover:text-[#e1aa1e] transition-all duration-300 hover:rotate-90"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

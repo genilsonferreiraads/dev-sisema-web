@@ -174,51 +174,48 @@ interface UserVideoHistory {
 export const videoService = {
   async updateVideoOrder(videoId: string): Promise<void> {
     try {
-      // 1. Primeiro, pega todos os vídeos ordenados
+      // Primeiro, busca todos os vídeos com seus dados completos
       const { data: allVideos } = await supabase
         .from('videos')
-        .select('id, play_order')
+        .select('*')
         .order('play_order', { ascending: false });
 
       if (!allVideos) return;
 
-      // 2. Encontra o vídeo atual e sua posição
       const currentVideo = allVideos.find(v => v.id === videoId);
       if (!currentVideo) return;
 
-      // 3. Atualiza a ordem dos vídeos em lote
-      const updates = allVideos.map((video, index) => {
-        if (video.id === videoId) {
-          // Vídeo selecionado vai para o topo
-          return {
-            id: video.id,
-            play_order: allVideos.length,
-            last_played: new Date().toISOString()
-          };
-        } else if (video.play_order > currentVideo.play_order) {
-          // Vídeos acima do selecionado mantêm sua posição
-          return {
-            id: video.id,
-            play_order: video.play_order
-          };
-        } else {
-          // Vídeos abaixo do selecionado descem uma posição
-          return {
-            id: video.id,
-            play_order: (video.play_order || 0) - 1
-          };
-        }
-      });
+      // Atualiza o vídeo selecionado primeiro
+      const { error: selectedError } = await supabase
+        .from('videos')
+        .update({ 
+          play_order: allVideos.length,
+          last_played: new Date().toISOString()
+        })
+        .eq('id', videoId);
 
-      // 4. Executa as atualizações
-      for (const update of updates) {
-        await supabase
+      if (selectedError) {
+        console.error('Erro ao atualizar vídeo selecionado:', selectedError);
+        throw selectedError;
+      }
+
+      // Atualiza os outros vídeos
+      for (const video of allVideos) {
+        if (video.id === videoId) continue;
+
+        const newOrder = video.play_order > currentVideo.play_order
+          ? video.play_order
+          : (video.play_order || 0) - 1;
+
+        const { error } = await supabase
           .from('videos')
-          .update({ 
-            play_order: update.play_order,
-            ...(update.last_played ? { last_played: update.last_played } : {})
-          })
-          .eq('id', update.id);
+          .update({ play_order: newOrder })
+          .eq('id', video.id);
+
+        if (error) {
+          console.error('Erro ao atualizar ordem do vídeo:', error);
+          // Continua mesmo com erro para tentar atualizar os outros
+        }
       }
     } catch (error) {
       console.error('Erro ao atualizar ordem do vídeo:', error);
@@ -228,51 +225,60 @@ export const videoService = {
 
   async addVideo(url: string, title: string): Promise<VideoData> {
     try {
-      // Primeiro, verifica se o vídeo já existe
-      const { data: existingVideo } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('url', url)
-        .single();
+      // Extrai o ID do vídeo da URL do embed para comparação
+      const videoId = url.split('/embed/')[1];
+      
+      // Faz as duas consultas em paralelo
+      const [{ data: existingVideos }, { data: allVideos }] = await Promise.all([
+        supabase
+          .from('videos')
+          .select('*')
+          .filter('url', 'ilike', `%${videoId}%`),
+        supabase
+          .from('videos')
+          .select('id, play_order')
+          .order('play_order', { ascending: false })
+      ]);
 
-      // Se o vídeo já existe, retorna ele
+      // Se o vídeo já existe, apenas atualiza sua ordem
+      const existingVideo = existingVideos?.[0];
       if (existingVideo) {
-        // Atualiza a ordem apenas do vídeo existente
         await videoService.updateVideoOrder(existingVideo.id);
         return existingVideo;
       }
 
-      // Se não existe, continua com a adição do novo vídeo
-      const { data: existingVideos } = await supabase
-        .from('videos')
-        .select('id, play_order')
-        .order('play_order', { ascending: false });
-
-      if (existingVideos) {
-        for (const video of existingVideos) {
-          await supabase
-            .from('videos')
-            .update({ play_order: (video.play_order || 0) - 1 })
-            .eq('id', video.id);
-        }
-      }
-
-      // Adiciona o novo vídeo com a maior ordem
+      // Adiciona o novo vídeo com a ordem correta
       const { data, error } = await supabase
         .from('videos')
         .insert([{ 
           url, 
           title, 
-          play_order: existingVideos?.length || 0,
+          play_order: allVideos?.length || 0,
           last_played: new Date().toISOString()
         }])
         .select()
         .single();
 
       if (error) throw error;
+      if (!data) throw new Error('Nenhum dado retornado após inserção');
 
-      // Limpa vídeos antigos após adicionar o novo
-      await videoService.cleanOldVideos();
+      // Atualiza a ordem dos vídeos existentes
+      if (allVideos?.length) {
+        for (const video of allVideos) {
+          const { error: updateError } = await supabase
+            .from('videos')
+            .update({ play_order: (video.play_order || 0) - 1 })
+            .eq('id', video.id);
+
+          if (updateError) {
+            console.error('Erro ao atualizar ordem do vídeo:', updateError);
+            // Continua mesmo com erro para tentar atualizar os outros
+          }
+        }
+      }
+
+      // Inicia limpeza de vídeos antigos em background
+      videoService.cleanOldVideos().catch(console.error);
 
       return data;
     } catch (error) {
@@ -467,4 +473,18 @@ export const videoService = {
       console.error('Erro ao limpar vídeos antigos:', error);
     }
   },
+
+  async updateVideoTitle(videoId: string, title: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('videos')
+        .update({ title })
+        .eq('id', videoId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Erro ao atualizar título do vídeo:', error);
+      throw error;
+    }
+  }
 }; 
