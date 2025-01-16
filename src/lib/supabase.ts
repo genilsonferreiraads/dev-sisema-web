@@ -19,6 +19,8 @@ export interface AudioData {
   last_played_at?: string;
   play_count?: number;
   timer_end_at?: string;
+  is_pinned?: boolean;
+  pinned_at?: string;
 }
 
 export interface VideoData {
@@ -51,7 +53,9 @@ export const audioService = {
         url: audio.url,
         auto_repeat: false,
         repeat_interval: 0,
-        play_count: 0
+        play_count: 0,
+        is_pinned: false,
+        pinned_at: undefined
       }])
       .select()
       .single();

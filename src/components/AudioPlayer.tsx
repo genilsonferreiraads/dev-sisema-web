@@ -3,7 +3,7 @@ import { audioService, AudioData } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import '../styles/animations.css';
 import TextToSpeech from './TextToSpeech';
-import { config } from '../config';
+import { TTS_API_KEYS } from '../config/api';
 
 interface AudioTimer {
   interval: number;
@@ -19,8 +19,6 @@ interface AudioPlayerProps {
 }
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlaying }) => {
-  console.log('Env API Key:', process.env.REACT_APP_GOOGLE_API_KEY ? 'Presente' : 'Ausente');
-
   const [audios, setAudios] = useState<AudioData[]>([]);
   const [currentAudio, setCurrentAudio] = useState<AudioData | null>(null);
   const [progress, setProgress] = useState(0);
@@ -57,10 +55,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const endTimeRefs = useRef<Record<string, string>>({});
   const [isTextToSpeechOpen, setIsTextToSpeechOpen] = useState(false);
   const [isTextToSpeechSpeaking, setIsTextToSpeechSpeaking] = useState(false);
-
-  useEffect(() => {
-    console.log('Estado do TextToSpeech:', { isOpen: isTextToSpeechOpen, isSpeaking: isTextToSpeechSpeaking });
-  }, [isTextToSpeechOpen, isTextToSpeechSpeaking]);
+  const [pinnedAudios, setPinnedAudios] = useState<string[]>([]);
+  const [showPinConfirm, setShowPinConfirm] = useState<string | null>(null);
+  const [pinConfirmPosition, setPinConfirmPosition] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     loadAudios();
@@ -74,7 +71,19 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const loadAudios = async () => {
     try {
       const data = await audioService.getAudios();
-      setAudios(data);
+      // Ordena os áudios fixados por pinned_at
+      const sortedData = [...data].sort((a, b) => {
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        if (a.is_pinned && b.is_pinned) {
+          return new Date(b.pinned_at!).getTime() - new Date(a.pinned_at!).getTime();
+        }
+        return 0;
+      });
+      setAudios(sortedData);
+      
+      // Atualiza o estado dos áudios fixados
+      setPinnedAudios(sortedData.filter(audio => audio.is_pinned).map(audio => audio.id));
       
       // Carrega as preferências para cada áudio
       data.forEach(audio => {
@@ -337,63 +346,58 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }
   };
 
+  // Função para sanitizar o nome do arquivo
+  const sanitizeFileName = (fileName: string): string => {
+    return fileName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+      .replace(/[^a-zA-Z0-9.]/g, '_')  // Substitui caracteres especiais por _
+      .replace(/_+/g, '_')             // Remove underscores múltiplos
+      .toLowerCase();                   // Converte para minúsculas
+  };
+
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+    if (!event.target.files || event.target.files.length === 0) return;
+    
+    const file = event.target.files[0];
+    // Sanitiza o nome do arquivo para evitar problemas com caracteres especiais
+    const sanitizedName = sanitizeFileName(file.name);
+    
     setIsUploading(true);
+    
     try {
-      console.log('Iniciando upload do arquivo:', file.name);
-      
-      // Upload do arquivo
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `audios/${fileName}`;
-
-      console.log('Tentando fazer upload para:', filePath);
-
+      // Upload do arquivo para o bucket 'audios'
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('media')
-        .upload(filePath, file);
+        .from('audios')
+        .upload(sanitizedName, file);
 
-      if (uploadError) {
-        console.error('Erro no upload:', uploadError);
-        throw uploadError;
-      }
+      if (uploadError) throw uploadError;
 
-      console.log('Upload bem sucedido:', uploadData);
-
-      // Obtém a URL pública
+      // Obtém a URL pública do arquivo
       const { data: { publicUrl } } = supabase.storage
-        .from('media')
-        .getPublicUrl(filePath);
+        .from('audios')
+        .getPublicUrl(sanitizedName);
 
-      console.log('URL pública gerada:', publicUrl);
+      // Salva a referência no banco de dados
+      const { error: dbError } = await supabase
+        .from('audios')
+        .insert([
+          {
+            title: file.name, // Mantém o nome original como título
+            url: publicUrl
+          }
+        ]);
 
-      // Adiciona ao banco de dados
-      const newAudio = await audioService.addAudio({
-        title: file.name,
-        url: publicUrl,
-        auto_repeat: false,
-        repeat_interval: 0,
-        play_count: 0
-      });
+      if (dbError) throw dbError;
 
-      console.log('Áudio adicionado ao banco:', newAudio);
-
-      // Recarrega todos os áudios
-      await loadAudios();
-      
-      // Seleciona o novo áudio
-      setCurrentAudio(newAudio);
-      
-      // Limpa o input
-      event.target.value = '';
-
+      loadAudios();
     } catch (error) {
-      console.error('Erro detalhado no upload:', error);
+      console.error('Erro ao fazer upload do áudio:', error);
     } finally {
       setIsUploading(false);
+      if (event.target) {
+        event.target.value = '';
+      }
     }
   };
 
@@ -426,8 +430,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           repeat_interval: minutes
         }
       }));
-      
-      console.log(`Timer salvo para ${audioId} com intervalo de ${minutes}min`);
     } catch (error) {
       console.error('Erro ao salvar preferências:', error);
     }
@@ -468,8 +470,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           repeat_interval: 0
         }
       }));
-      
-      console.log(`Timer removido para ${audioId}`);
     } catch (error) {
       console.error('Erro ao salvar preferências:', error);
     }
@@ -481,40 +481,20 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       if (!audioToDelete) return;
 
       const fileUrl = audioToDelete.url;
-      const fileName = fileUrl.split('/audios/')[1]?.split('?')[0];
+      const fileName = fileUrl.split('/').pop()?.split('?')[0];
+      
+      if (!fileName) {
+        console.error('Nome do arquivo não encontrado na URL');
+        return;
+      }
 
-      if (fileName) {
-        console.log('Tentando remover arquivo:', fileName);
+      const { error: deleteError } = await supabase.storage
+        .from('audios')
+        .remove([fileName]);
 
-        try {
-          // Primeira tentativa de remoção
-          const { error: storageError } = await supabase.storage
-            .from('media')
-            .remove([`audios/${fileName}`]);
-
-          if (storageError) {
-            console.error('Erro ao remover arquivo:', storageError);
-            
-            // Se falhar, espera um momento e tenta novamente
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Segunda tentativa
-            await supabase.storage
-              .from('media')
-              .remove([`audios/${fileName}`]);
-          }
-
-          // Verifica se o arquivo ainda existe
-          const { data: files } = await supabase.storage
-            .from('media')
-            .list('audios', {
-              search: fileName
-            });
-
-          console.log('Verificação após remoção:', files);
-        } catch (storageError) {
-          console.error('Erro ao acessar storage:', storageError);
-        }
+      if (deleteError) {
+        console.error('Erro ao deletar arquivo:', deleteError);
+        return;
       }
 
       // Remove o registro do banco de dados
@@ -536,17 +516,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         return newPrefs;
       });
 
-      // Força uma atualização da lista de arquivos no storage
-      const { data: updatedFiles } = await supabase.storage
-        .from('media')
-        .list('audios');
-
-      console.log('Lista atualizada de arquivos:', updatedFiles);
-
       // Recarrega a lista de áudios
       await loadAudios();
 
-      console.log('Áudio removido com sucesso:', audioId);
     } catch (error) {
       console.error('Erro ao deletar áudio:', error);
       try {
@@ -566,7 +538,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   // Adicione esta função auxiliar para formatar o tempo do timer
   const formatTimeLeft = (seconds: number): string => {
     if (seconds < 60) {
-      return `${Math.ceil(seconds)}s`;
+      return `${Math.ceil(seconds)} Segundos`;
     }
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.ceil(seconds % 60);
@@ -950,6 +922,101 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     draw();
   };
 
+  const togglePin = async (audioId: string) => {
+    try {
+      const audio = audios.find(a => a.id === audioId);
+      if (!audio) return;
+
+      const isPinned = !audio.is_pinned;
+      const pinned_at = isPinned ? new Date().toISOString() : undefined;
+
+      // Atualiza no banco de dados
+      const { data, error } = await supabase
+        .from('audios')
+        .update({ 
+          is_pinned: isPinned,
+          pinned_at: pinned_at
+        })
+        .eq('id', audioId);
+
+      if (error) throw error;
+
+      // Atualiza o estado local
+      setPinnedAudios(prev => {
+        if (isPinned) {
+          return [audioId, ...prev];
+        } else {
+          return prev.filter(id => id !== audioId);
+        }
+      });
+
+      // Atualiza a lista de áudios
+      setAudios(prev => prev.map(a => 
+        a.id === audioId 
+          ? { ...a, is_pinned: isPinned, pinned_at: pinned_at }
+          : a
+      ));
+
+    } catch (error) {
+      console.error('Erro ao atualizar estado fixado:', error);
+    }
+  };
+
+  const PinConfirmDialog = ({ 
+    audioId, 
+    audioTitle,
+    onConfirm,
+    onCancel,
+    buttonPosition,
+    isPinned
+  }: { 
+    audioId: string;
+    audioTitle: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+    buttonPosition: { x: number; y: number } | null;
+    isPinned: boolean;
+  }) => (
+    <div className="fixed inset-0 z-50" onClick={(e) => {
+      if (e.target === e.currentTarget) onCancel();
+    }}>
+      <div 
+        className="absolute bg-[#2d2d2d]/95 backdrop-blur-sm px-4 py-2.5 rounded-lg shadow-lg border border-white/10"
+        style={{
+          top: buttonPosition ? `${buttonPosition.y + 10}px` : '50%',
+          left: buttonPosition ? `${buttonPosition.x - 90}px` : '50%',
+          transform: isAnimating ? 'scale(0.95)' : 'scale(1)',
+          opacity: isAnimating ? 0 : 1,
+          transition: 'all 0.2s ease-out'
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onCancel}
+            className="text-white/80 hover:text-white text-xs font-medium transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            className="text-[#e1aa1e] hover:text-[#e1aa1e]/80 text-xs font-medium transition-colors"
+          >
+            {isPinned ? 'Desfixar' : 'Fixar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const handlePin = (e: React.MouseEvent, audioId: string) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPinConfirmPosition({ 
+      x: rect.left + rect.width/2, 
+      y: rect.top + rect.height/2 
+    });
+    setShowPinConfirm(audioId);
+  };
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-4">
       {/* Player Principal com Visualizador */}
@@ -1142,7 +1209,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M12 4v16m8-8H4"
+                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
               />
             </svg>
             <span className="text-sm">
@@ -1165,106 +1232,142 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           Clique no ícone de edição ou dê um duplo clique no nome para renomear
         </div>
 
-        {audios.map((audio) => (
-          <div
-            key={audio.id}
-            className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#2d2d2d] transition-colors min-w-0 bg-[#1e1e1e] mb-2"
-          >
-            <button
-              onClick={() => togglePlay(audio)}
-              className="p-1 hover:bg-[#404040] rounded-full transition-colors"
+        {audios
+          .sort((a, b) => {
+            if (a.is_pinned && !b.is_pinned) return -1;
+            if (!b.is_pinned && a.is_pinned) return 1;
+            if (a.is_pinned && b.is_pinned) {
+              return new Date(b.pinned_at!).getTime() - new Date(a.pinned_at!).getTime();
+            }
+            return 0;
+          })
+          .map((audio) => (
+            <div
+              key={audio.id}
+              className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#2d2d2d] transition-colors min-w-0 bg-[#1e1e1e] mb-2"
             >
-              <svg
-                className="w-6 h-6 text-[#e1aa1e]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              <button
+                onClick={(e) => handlePin(e, audio.id)}
+                className={`p-1.5 hover:bg-[#404040] rounded transition-colors ${
+                  pinnedAudios.includes(audio.id) 
+                    ? 'text-[#e1aa1e]' 
+                    : 'text-white hover:text-[#e1aa1e]'
+                }`}
+                title={pinnedAudios.includes(audio.id) ? "Desfixar áudio" : "Fixar áudio"}
               >
-                {isPlaying && currentAudio?.id === audio.id ? (
+                <svg
+                  className="w-6 h-6 -rotate-90"
+                  fill="currentColor"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                  viewBox="0 0 364 366"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    d="M205.8 264.3c-5.8-6.6-8.4-20.6-5.8-31.3l1.3-5.2-17.9-17.9-17.9-17.9-6.5 2.6c-14.1 5.7-31.3 7-45.6 3.4-10.1-2.5-22.5-8.7-29.3-14.7l-5.3-4.6 22.1-22.1 22.1-22.1-23.5-23.5-23.4-23.4-2.2-9.3c-1.3-5.1-2-9.6-1.6-10 0.4-0.4 4.9 0.3 10 1.6l9.3 2.2 23.4 23.4 23.5 23.5 22.1-22.1 22.1-22.1 4.2 4.9c9.9 11.2 16 26.7 16.8 42.9 0.7 11.9-0.7 20.9-4.8 31.4l-2.9 7.5 17.9 17.9 17.9 17.9 5.2-1.3c7.9-1.9 19.4-0.9 25.6 2.3 9.7 4.9 11.3 2.2-23.2 36.8-17 17-31.2 30.9-31.5 30.9-0.3 0-1.3-0.8-2.1-1.7z"
                   />
-                ) : (
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                )}
-              </svg>
-            </button>
+                </svg>
+              </button>
 
-            {editingAudioId === audio.id ? (
-                    <input
-                type="text"
-                value={editingTitle}
-                onChange={(e) => setEditingTitle(e.target.value)}
-                onBlur={() => {
-                  if (editingTitle.trim() && editingTitle !== audio.title) {
-                    handleUpdateTitle(audio.id, editingTitle);
-                  } else {
-                    setEditingAudioId(null);
-                  }
-                }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+              <button
+                onClick={() => togglePlay(audio)}
+                className="p-1 hover:bg-[#404040] rounded-full transition-colors"
+              >
+                <svg
+                  className="w-6 h-6 text-[#e1aa1e]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {isPlaying && currentAudio?.id === audio.id ? (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  ) : (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  )}
+                </svg>
+              </button>
+
+              {editingAudioId === audio.id ? (
+                <input
+                  type="text"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => {
                     if (editingTitle.trim() && editingTitle !== audio.title) {
                       handleUpdateTitle(audio.id, editingTitle);
                     } else {
                       setEditingAudioId(null);
                     }
-                  } else if (e.key === 'Escape') {
-                    setEditingAudioId(null);
-                  }
-                }}
-                className="flex-1 bg-[#1e1e1e] text-gray-200 px-2 py-1 rounded border border-[#404040] focus:border-[#e1aa1e] focus:outline-none"
-                      autoFocus
-              />
-            ) : (
-              <div className="flex-1 flex items-center group">
-                <div className="flex-1 flex items-center">
-                <span 
-                    className="truncate cursor-pointer hover:text-[#e1aa1e]"
-                  onDoubleClick={() => {
-                    setEditingAudioId(audio.id);
-                    setEditingTitle(audio.title);
                   }}
-                >
-                  {audio.title}
-                </span>
-                <button
-                  onClick={() => {
-                    setEditingAudioId(audio.id);
-                    setEditingTitle(audio.title);
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (editingTitle.trim() && editingTitle !== audio.title) {
+                        handleUpdateTitle(audio.id, editingTitle);
+                      } else {
+                        setEditingAudioId(null);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setEditingAudioId(null);
+                    }
                   }}
-                    className="p-1 rounded-full hover:bg-[#404040] opacity-0 group-hover:opacity-100 transition-all ml-1"
-                  title="Editar nome"
-                >
-                  <svg
-                      className="w-4 h-4 text-[#e1aa1e]"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                </button>
+                  className="flex-1 bg-[#1e1e1e] text-gray-200 px-2 py-1 rounded border border-[#404040] focus:border-[#e1aa1e] focus:outline-none"
+                  autoFocus
+                />
+              ) : (
+                <div className="flex-1 flex items-center min-w-0 group">
+                  <div className="flex-1 flex items-center min-w-0">
+                    <span 
+                      className="truncate cursor-pointer hover:text-[#e1aa1e]"
+                      onDoubleClick={() => {
+                        setEditingAudioId(audio.id);
+                        setEditingTitle(audio.title);
+                      }}
+                    >
+                      {audio.title}
+                    </span>
+                    <div className="flex items-center h-full [&_[data-tooltip]]:relative [&_[data-tooltip]]:before:content-[attr(title)] [&_[data-tooltip]]:before:absolute [&_[data-tooltip]]:before:px-3 [&_[data-tooltip]]:before:py-2 [&_[data-tooltip]]:before:left-1/2 [&_[data-tooltip]]:before:-translate-x-1/2 [&_[data-tooltip]]:before:-top-10 [&_[data-tooltip]]:before:bg-[#2d2d2d]/95 [&_[data-tooltip]]:before:backdrop-blur-sm [&_[data-tooltip]]:before:rounded-lg [&_[data-tooltip]]:before:text-xs [&_[data-tooltip]]:before:font-medium [&_[data-tooltip]]:before:text-[#e1aa1e] [&_[data-tooltip]]:before:whitespace-nowrap [&_[data-tooltip]]:before:opacity-0 [&_[data-tooltip]]:before:scale-95 [&_[data-tooltip]]:before:transition-all [&_[data-tooltip]]:hover:before:opacity-100 [&_[data-tooltip]]:hover:before:scale-100 [&_[data-tooltip]]:before:shadow-lg [&_[data-tooltip]]:before:border [&_[data-tooltip]]:before:border-[#e1aa1e]/10">
+                      <button
+                        onClick={() => {
+                          setEditingAudioId(audio.id);
+                          setEditingTitle(audio.title);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity -ml-1 pl-2 flex items-center h-full py-0.5"
+                        title="Alterar nome • Editar"
+                        data-tooltip="true"
+                      >
+                        <svg
+                          className="w-4 h-4 text-[#e1aa1e]"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
-            
-            <div className="flex items-center gap-2 shrink-0">
+              )}
+              
+              <div className="flex items-center gap-2 shrink-0">
                 {audioTimers[audio.id] ? (
-                    <button
+                  <button
                     onClick={(e) => {
                       handleShowConfirmDialog(e, audio.id);
                     }}
@@ -1272,7 +1375,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                     title="Clique para desativar a repetição"
                   >
                     <svg
-                      className="w-4 h-4"
+                      className="w-5 h-5"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -1281,62 +1384,62 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                       />
                     </svg>
                     <span className="text-sm">
                       {formatTimeLeft(audioTimers[audio.id].timeLeft)}
                     </span>
-                    </button>
+                  </button>
                 ) : (
-                    <button
+                  <button
                     onClick={(e) => {
                       handleShowTimerDialog(e, audio.id);
                     }}
                     className="p-1.5 hover:bg-[#404040] rounded transition-colors text-gray-400 hover:text-[#e1aa1e]"
                     title="Ativar repetição automática"
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
                     >
-                      <svg
-                      className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        />
-                      </svg>
-                    </button>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                  </button>
                 )}
 
-              <button
-                onClick={(e) => {
-                  setDeletePosition({ x: e.currentTarget.getBoundingClientRect().x, y: e.currentTarget.getBoundingClientRect().y + 30 });
-                  setShowDeleteConfirm(audio.id);
-                }}
-                className="p-1 hover:bg-[#404040] rounded-full transition-colors text-red-400 hover:text-red-300"
-                title="Excluir áudio"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                <button
+                  onClick={(e) => {
+                    setDeletePosition({ x: e.currentTarget.getBoundingClientRect().x, y: e.currentTarget.getBoundingClientRect().y + 30 });
+                    setShowDeleteConfirm(audio.id);
+                  }}
+                  className="p-1 hover:bg-[#404040] rounded-full transition-colors text-red-400 hover:text-red-300"
+                  title="Excluir áudio"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
       </div>
 
       {showTimerDialog && (
@@ -1399,15 +1502,28 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         />
       )}
 
+      {showPinConfirm && (
+        <PinConfirmDialog
+          audioId={showPinConfirm}
+          audioTitle={audios.find(a => a.id === showPinConfirm)?.title || ''}
+          onConfirm={() => {
+            togglePin(showPinConfirm);
+            setShowPinConfirm(null);
+            setPinConfirmPosition(null);
+          }}
+          onCancel={() => {
+            setShowPinConfirm(null);
+            setPinConfirmPosition(null);
+          }}
+          buttonPosition={pinConfirmPosition}
+          isPinned={pinnedAudios.includes(showPinConfirm)}
+        />
+      )}
+
       <TextToSpeech
-        apiKey={config.googleApiKey}
         isOpen={isTextToSpeechOpen}
-        onClose={() => {
-          console.log('Fechando TextToSpeech'); // Debug
-          setIsTextToSpeechOpen(false);
-        }}
-        onPlayingChange={(playing) => {
-          console.log('TextToSpeech playing changed:', playing); // Debug
+        onClose={() => setIsTextToSpeechOpen(false)}
+        onPlayingChange={(playing: boolean) => {
           setIsTextToSpeechSpeaking(playing);
           if (playing && audioRef.current && isPlaying) {
             audioRef.current.pause();

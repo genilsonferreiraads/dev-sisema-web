@@ -53,6 +53,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [nextPageToken, setNextPageToken] = useState<string>('');
+  const [prevPageTokens, setPrevPageTokens] = useState<string[]>([]);
+  const videosPerPage = 9; // 3x3 grid
 
   useEffect(() => {
     loadVideos();
@@ -97,7 +101,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
               setPlayer(event.target);
               setIsPlayerReady(true);
               
-              // Verifica se há áudio tocando ao inicializar
               const audioElement = document.querySelector('audio');
               const isAudioPlaying = audioElement && !audioElement.paused;
               event.target.setVolume(isAudioPlaying ? 10 : 100);
@@ -141,12 +144,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     try {
       const data = await videoService.getRecentVideos();
       
-      // Garante que temos um usuário antes de carregar o histórico
       const userData = localStorage.getItem('user');
       const user = userData ? JSON.parse(userData) : null;
       
       if (user?.id) {
-        // Carrega o último vídeo assistido
         const lastVideoId = await videoService.getLastWatchedVideo(user.id);
         
         if (lastVideoId) {
@@ -161,7 +162,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           setVideos(data);
         }
 
-        // Carrega o histórico completo
         const history = await videoService.getVideoHistory(user.id);
         setLastWatchedVideos(history);
       } else {
@@ -233,7 +233,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       return;
     }
 
-    // Dispara o evento imediatamente após clicar no botão
     window.dispatchEvent(new CustomEvent('videoAdded', {
       detail: { videoUrl: urlToAdd }
     }));
@@ -241,7 +240,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     try {
       const embedUrl = getEmbedUrl(urlToAdd);
       
-      // Verifica se o vídeo já existe
       const videoId = urlToAdd.includes('youtube.com')
         ? urlToAdd.split('v=')[1]?.split('&')[0]
         : urlToAdd.includes('youtu.be')
@@ -251,26 +249,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       const existingVideo = videos.find(v => v.url.includes(videoId || ''));
       
       if (existingVideo) {
-        // Se o vídeo já existe, apenas atualiza a ordem e seleciona
         await videoService.updateVideoOrder(existingVideo.id);
         setVideos(prev => [existingVideo, ...prev.filter(v => v.id !== existingVideo.id)]);
         setSelectedVideo(existingVideo);
         setNewVideoUrl('');
 
-        // Atualiza o histórico se houver usuário
         if (user?.id) {
           videoService.saveVideoHistory(user.id, existingVideo.id).catch(console.error);
           setLastWatchedVideos(prev => [existingVideo.id, ...prev]);
         }
 
-        // Dispara evento para fechar o popup
         if (videoId) {
           window.dispatchEvent(new CustomEvent('videoAdded', {
             detail: { videoUrl: urlToAdd }
           }));
         }
       } else {
-        // Se não existe, adiciona normalmente
         const videoTitle = await getVideoTitle(urlToAdd);
         const newVideo = await videoService.addVideo(embedUrl, videoTitle);
         
@@ -290,7 +284,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
     } catch (error: any) {
-      console.error('Erro detalhado:', error);
+      console.error('Erro ao adicionar vídeo:', error);
       setError(
         error.message || 
         error.error_description || 
@@ -336,37 +330,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const handleSearch = async (input: string) => {
     setIsSearching(true);
     setError('');
+    setCurrentPage(1);
+    setPrevPageTokens([]);
 
     const apiKeys = getApiKeys();
-    console.log('APIs disponíveis para busca:', apiKeys.length);
 
     try {
-      // Primeira requisição para buscar os vídeos
-      console.log('Iniciando busca de vídeos...');
       const searchData = await fetchWithCache(
-        `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(input)}&type=video&key=API_KEY&maxResults=21`,
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(input)}&type=video&key=API_KEY&maxResults=21&relevanceLanguage=pt&regionCode=BR`,
         apiKeys
       );
 
       if (!searchData?.items?.length) {
-        console.log('Nenhum resultado encontrado');
         setError('Nenhum vídeo encontrado para esta busca.');
+        setIsSearching(false);
         return;
       }
 
-      console.log(`Encontrados ${searchData.items.length} vídeos`);
+      setNextPageToken(searchData.nextPageToken || '');
+      setSearchResults(searchData.items);
 
       try {
-        // Segunda requisição para buscar os detalhes dos vídeos
-        console.log('Buscando detalhes dos vídeos...');
         const videoIds = searchData.items.map((item: YouTubeSearchResult) => item.id.videoId).join(',');
         const detailsData = await fetchWithCache(
           `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=API_KEY`,
           apiKeys
         );
 
-        // Combina os resultados
-        console.log('Combinando resultados...');
         const resultsWithDuration = searchData.items.map((item: YouTubeSearchResult) => {
           const details = detailsData.items.find((detail: any) => detail.id === item.id.videoId);
           return {
@@ -375,21 +365,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           };
         });
 
-        console.log('Busca concluída com sucesso');
         setSearchResults(resultsWithDuration);
       } catch (detailsError) {
-        console.error('Erro ao buscar detalhes:', detailsError);
-        // Se falhar ao buscar detalhes, ainda mostra os resultados básicos
+        console.error('Erro ao buscar detalhes dos vídeos:', detailsError);
         setSearchResults(searchData.items);
       }
     } catch (error) {
-      console.error('Erro detalhado na busca:', error);
+      console.error('Erro ao buscar vídeos:', error);
       setError('Erro ao buscar vídeos. Por favor, tente novamente.');
       setSearchResults([]);
-    } finally {
-      if (searchResults.length === 0) {
-        setIsSearching(false);
-      }
+      setIsSearching(false);
     }
   };
 
@@ -459,38 +444,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   };
 
   const handleVideoSelect = async (video: VideoData | YouTubeSearchResult) => {
-    if (isLoading) return; // Previne múltiplos cliques enquanto processa
+    if (isLoading) return;
     setIsLoading(true);
-    setIsSearching(false); // Fecha o modal imediatamente
+    setIsSearching(false);
     
     try {
       let selectedVideoData: VideoData;
       
       if (isYouTubeSearchResult(video)) {
-        // É um resultado da busca do YouTube
         const videoUrl = `https://www.youtube.com/embed/${video.id.videoId}`;
         const newVideo = await videoService.addVideo(videoUrl, video.snippet.title);
         selectedVideoData = newVideo;
       } else {
-        // É um vídeo existente
         selectedVideoData = video;
       }
       
       setSelectedVideo(selectedVideoData);
       setIsSidebarOpen(false);
       
-      // Verifica se há áudio tocando
       const audioElement = document.querySelector('audio');
       const isAudioPlaying = audioElement && !audioElement.paused;
 
-      // Se houver áudio tocando, já inicia com volume baixo
       if (isAudioPlaying && player && isPlayerReady) {
         player.setVolume(10);
       } else if (player && isPlayerReady) {
         player.setVolume(100);
       }
 
-      // Inicia o vídeo sem disparar eventos externos
       if (player && isPlayerReady) {
         try {
           await player.playVideo();
@@ -523,7 +503,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const handleStateChange = (event: any) => {
     if (isInternalStateChange) return;
 
-    if (event.data === 0) { // vídeo terminou
+    if (event.data === 0) {
       if (pendingVideoId) {
         const pendingVideo = videos.find(v => v.id === pendingVideoId);
         if (pendingVideo) {
@@ -531,8 +511,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
       onEnded();
-    } else if (event.data === 1) { // vídeo começou a tocar
-      // Apenas ajusta o volume se necessário
+    } else if (event.data === 1) {
       const audioElement = document.querySelector('audio');
       const isAudioPlaying = audioElement && !audioElement.paused;
       
@@ -619,73 +598,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   }, [isPlaying, player, isPlayerReady]);
 
   const handlePopupVideo = async (url: string) => {
-    console.log('=== Início do handlePopupVideo ===');
-    console.log('URL recebida:', url);
-    
     if (!url.trim()) {
-      console.log('URL vazia, retornando');
       return null;
     }
     
     try {
-      console.log('Extraindo ID do vídeo...');
       const videoId = url.includes('youtube.com') 
         ? url.split('v=')[1]?.split('&')[0]
         : url.includes('youtu.be')
         ? url.split('youtu.be/')[1]?.split('?')[0]
         : null;
 
-      console.log('ID do vídeo extraído:', videoId);
-
       if (!videoId) {
-        console.log('ID do vídeo inválido');
         throw new Error('URL inválida');
       }
 
       const embedUrl = `https://www.youtube.com/embed/${videoId}`;
-      console.log('URL de embed gerada:', embedUrl);
-
-      // Verifica se o vídeo já existe
-      console.log('Verificando se o vídeo já existe...');
       const existingVideo = videos.find(v => v.url.includes(videoId));
       
       if (existingVideo) {
-        // Se o vídeo já existe, apenas atualiza a ordem e seleciona
-        console.log('Vídeo já existe, atualizando ordem...');
         await videoService.updateVideoOrder(existingVideo.id);
         setVideos(prev => [existingVideo, ...prev.filter(v => v.id !== existingVideo.id)]);
         setSelectedVideo(existingVideo);
 
-        // Atualiza o histórico em background
         if (user?.id) {
           videoService.saveVideoHistory(user.id, existingVideo.id).catch(console.error);
           setLastWatchedVideos(prev => [existingVideo.id, ...prev]);
         }
 
-        console.log('=== Fim do handlePopupVideo com sucesso (vídeo existente) ===');
         return existingVideo;
       }
 
-      // Se não existe, adiciona normalmente
-      console.log('Vídeo não existe, adicionando novo...');
       const videoTitle = await getVideoTitle(url);
       const newVideo = await videoService.addVideo(embedUrl, videoTitle);
       
-      // Atualiza a interface
-      console.log('Atualizando interface...');
       setVideos(prev => [newVideo, ...prev.filter(v => v.id !== newVideo.id)]);
       setSelectedVideo(newVideo);
 
-      // Atualiza o histórico em background
       if (user?.id) {
         videoService.saveVideoHistory(user.id, newVideo.id).catch(console.error);
         setLastWatchedVideos(prev => [newVideo.id, ...prev]);
       }
 
-      console.log('=== Fim do handlePopupVideo com sucesso (novo vídeo) ===');
       return newVideo;
     } catch (error: any) {
-      console.error('=== Erro no handlePopupVideo ===', error);
+      console.error('Erro ao adicionar vídeo:', error);
       setError('Erro ao adicionar vídeo. Verifique se a URL é válida.');
       throw error;
     }
@@ -716,27 +673,116 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       clearTimeout(typingTimeout);
     }
 
-    // Reduzimos o delay de 500ms para 300ms
+    // Configuramos um novo timeout para buscar sugestões
     const newTimeout = setTimeout(async () => {
-      const apiKeys = getApiKeys();
-
       try {
-        const data = await fetchWithCache(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(value)}&type=video&key=API_KEY&maxResults=5`,
-          apiKeys
-        );
-        setSuggestions(data.items);
+        // Cria um elemento script para JSONP
+        const script = document.createElement('script');
+        const callbackName = 'youtubeSuggestCallback_' + Math.random().toString(36).substr(2, 9);
+        
+        // Cria a promise para aguardar a resposta
+        const suggestionPromise = new Promise((resolve, reject) => {
+          // Define a função de callback
+          (window as any)[callbackName] = (data: any) => {
+            delete (window as any)[callbackName];
+            document.body.removeChild(script);
+            resolve(data[1]); // data[1] contém as sugestões
+          };
+
+          // Define timeout
+          setTimeout(() => {
+            if ((window as any)[callbackName]) {
+              delete (window as any)[callbackName];
+              document.body.removeChild(script);
+              reject(new Error('Timeout ao buscar sugestões'));
+            }
+          }, 5000);
+        });
+
+        // Configura o script
+        script.src = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q=${encodeURIComponent(value)}&callback=${callbackName}`;
+        document.body.appendChild(script);
+
+        // Aguarda as sugestões
+        const suggestionsData = await suggestionPromise;
+        
+        if (Array.isArray(suggestionsData)) {
+          // Processa as sugestões
+          const suggestions = suggestionsData
+            .map((item: any) => createSuggestion(Array.isArray(item) ? item[0] : item))
+            .filter((s: any) => s.snippet.title.trim() !== '');
+
+          // Adiciona o termo original se não estiver nas sugestões
+          if (!suggestions.some(s => s.snippet.title.toLowerCase() === value.toLowerCase())) {
+            suggestions.unshift(createSuggestion(value));
+          }
+
+          setSuggestions(suggestions);
         setShowSuggestions(true);
         setError('');
+        }
       } catch (error) {
         console.error('Erro ao buscar sugestões:', error);
-        setSuggestions([]);
-        setShowSuggestions(false);
+        
+        // Em caso de erro, usa sugestões locais como fallback
+        const searchTerm = value.toLowerCase();
+        const suggestions = [];
+
+        // Adiciona o termo de busca original
+        suggestions.push(createSuggestion(value));
+
+        // Adiciona sugestões baseadas no termo como fallback
+        if (searchTerm.includes('music') || searchTerm.includes('musica')) {
+          suggestions.push(
+            createSuggestion(`${value} para academia`),
+            createSuggestion(`${value} motivacional`),
+            createSuggestion(`${value} treino`),
+            createSuggestion(`${value} workout`),
+            createSuggestion(`${value} internacional`)
+          );
+        } else if (searchTerm.includes('treino')) {
+          suggestions.push(
+            createSuggestion(`${value} completo`),
+            createSuggestion(`${value} em casa`),
+            createSuggestion(`${value} hiit`),
+            createSuggestion(`${value} funcional`),
+            createSuggestion(`${value} iniciantes`)
+          );
+        } else if (searchTerm.includes('workout')) {
+          suggestions.push(
+            createSuggestion(`${value} motivation`),
+            createSuggestion(`${value} music`),
+            createSuggestion(`${value} gym`),
+            createSuggestion(`${value} playlist`),
+            createSuggestion(`${value} mix`)
+          );
+        } else {
+          suggestions.push(
+            createSuggestion(`${value} academia`),
+            createSuggestion(`${value} fitness`),
+            createSuggestion(`${value} playlist`),
+            createSuggestion(`${value} melhores`),
+            createSuggestion(`${value} 2024`)
+          );
+        }
+
+        setSuggestions(suggestions);
+        setShowSuggestions(true);
       }
-    }, 300); // Reduzido de 500ms para 300ms
+    }, 300);
 
     setTypingTimeout(newTimeout);
   };
+
+  // Função auxiliar para criar sugestões
+  const createSuggestion = (term: string): YouTubeSearchResult => ({
+    id: { videoId: `search-${term}` },
+    snippet: {
+      title: term,
+      description: 'Sugestão de busca',
+      thumbnails: { medium: { url: '' } }
+    }
+  });
 
   // Adiciona um ref para o container do input e sugestões
   const containerRef = useRef<HTMLDivElement>(null);
@@ -791,25 +837,120 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     return "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"; // Ícone de pesquisa (default)
   };
 
+  const handleNextPage = async () => {
+    if (!nextPageToken) return;
+
+    try {
+      setIsLoading(true);
+      const apiKeys = getApiKeys();
+      const data = await fetchWithCache(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=21&type=video&key=API_KEY&q=${encodeURIComponent(lastSearchTerm)}&pageToken=${nextPageToken}&relevanceLanguage=pt&regionCode=BR`,
+        apiKeys
+      );
+
+      if (data.items && data.items.length > 0) {
+        // Salva o token atual para navegação anterior
+        setPrevPageTokens(prev => [...prev, nextPageToken]);
+        
+        // Atualiza o próximo token
+        setNextPageToken(data.nextPageToken || '');
+        
+        // Atualiza os resultados
+        setSearchResults(data.items);
+        setCurrentPage(prev => prev + 1);
+
+        // Busca detalhes dos vídeos
+        try {
+          const videoIds = data.items.map((item: YouTubeSearchResult) => item.id.videoId).join(',');
+          const detailsData = await fetchWithCache(
+            `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=API_KEY`,
+            apiKeys
+          );
+
+          const resultsWithDuration = data.items.map((item: YouTubeSearchResult) => {
+            const details = detailsData.items.find((detail: any) => detail.id === item.id.videoId);
+            return {
+              ...item,
+              contentDetails: details?.contentDetails
+            };
+          });
+
+          setSearchResults(resultsWithDuration);
+        } catch (error) {
+          console.error('Erro ao buscar detalhes dos vídeos:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar mais vídeos:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePrevPage = async () => {
+    if (currentPage <= 1 || prevPageTokens.length === 0) return;
+
+    try {
+      setIsLoading(true);
+      const apiKeys = getApiKeys();
+      const prevToken = prevPageTokens[prevPageTokens.length - 2]; // Pega o token anterior
+
+      const data = await fetchWithCache(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=21&type=video&key=API_KEY&q=${encodeURIComponent(lastSearchTerm)}&pageToken=${prevToken || ''}&relevanceLanguage=pt&regionCode=BR`,
+        apiKeys
+      );
+
+      if (data.items && data.items.length > 0) {
+        // Remove o último token usado
+        setPrevPageTokens(prev => prev.slice(0, -1));
+        
+        // Atualiza o próximo token
+        setNextPageToken(data.nextPageToken || '');
+        
+        // Atualiza os resultados
+        setSearchResults(data.items);
+        setCurrentPage(prev => prev - 1);
+
+        // Busca detalhes dos vídeos
+        try {
+          const videoIds = data.items.map((item: YouTubeSearchResult) => item.id.videoId).join(',');
+          const detailsData = await fetchWithCache(
+            `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=API_KEY`,
+            apiKeys
+          );
+
+          const resultsWithDuration = data.items.map((item: YouTubeSearchResult) => {
+            const details = detailsData.items.find((detail: any) => detail.id === item.id.videoId);
+            return {
+              ...item,
+              contentDetails: details?.contentDetails
+            };
+          });
+
+          setSearchResults(resultsWithDuration);
+        } catch (error) {
+          console.error('Erro ao buscar detalhes dos vídeos:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar página anterior:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3">
       <form onSubmit={handleSubmit} className="mb-3">
         <div className="flex flex-col gap-2" ref={containerRef}>
           <div className="relative">
-            <input
-              type="text"
-              value={newVideoUrl}
-              onChange={handleInputChange}
-              placeholder="Cole uma URL do YouTube ou digite para buscar vídeos"
-              className="w-full bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded px-3 py-2 focus:border-[#e1aa1e] focus:outline-none pr-20"
-              disabled={isLoading}
-            />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-              {newVideoUrl && (
-                <button
-                  type="button"
-                  onClick={handleSearchButton}
-                  className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-[#404040] transition-all duration-300"
+            <div className="relative flex items-center">
+              <div 
+                className="absolute left-3 text-gray-400 hover:text-[#e1aa1e] transition-all duration-300 cursor-pointer"
+                onClick={() => {
+                  setLastSearchTerm(newVideoUrl.trim());
+                  handleSearchButton();
+                }}
                 >
                   <svg
                     className="w-4 h-4"
@@ -824,13 +965,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                       d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                     />
                   </svg>
-                </button>
-              )}
+              </div>
+              <input
+                type="text"
+                value={newVideoUrl}
+                onChange={handleInputChange}
+                placeholder="Cole uma URL do YouTube ou digite para buscar vídeos"
+                className="w-full bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded-full px-10 py-2.5 focus:border-[#e1aa1e] focus:outline-none pr-10 transition-all duration-300 focus:shadow-[0_0_10px_rgba(225,170,30,0.3)]"
+                disabled={isLoading}
+              />
               {newVideoUrl && (
-                <button
-                  type="button"
+                <div 
+                  className="absolute right-3 text-gray-400 hover:text-white p-1 rounded-full hover:bg-[#404040] transition-all duration-300 cursor-pointer"
                   onClick={handleClearInput}
-                  className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-[#404040] transition-all duration-300"
                 >
                   <svg
                     className="w-4 h-4"
@@ -843,47 +990,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                   >
                     <path d="M6 18L18 6M6 6l12 12"></path>
                   </svg>
-                </button>
+                </div>
               )}
             </div>
             {showSuggestions && suggestions.length > 0 && (
               <div className="absolute z-50 w-full mt-1 bg-[#2d2d2d] border border-[#404040] rounded-lg shadow-xl max-h-[300px] overflow-y-auto custom-scrollbar">
-                <div
-                  className="p-3 hover:bg-[#363636] cursor-pointer transition-colors duration-300 flex items-center gap-3 border-b border-[#404040]"
-                  onClick={() => handleSuggestionClick({ 
-                    id: { videoId: 'search' },
-                    snippet: {
-                      title: newVideoUrl,
-                      description: '',
-                      thumbnails: { medium: { url: '' } }
-                    }
-                  })}
-                >
-                  <div className="text-gray-400 flex-shrink-0">
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                      />
-                    </svg>
-                  </div>
-                  <h4 className="text-sm font-medium text-[#e1aa1e] flex-1">
-                    Buscar "{newVideoUrl}"
-                  </h4>
-                </div>
-
-                {suggestions.map((suggestion) => (
+                {suggestions.map((suggestion, index) => (
                   <div
-                    key={suggestion.id.videoId}
+                    key={`${suggestion.id.videoId}-${index}`}
                     className="p-3 hover:bg-[#363636] cursor-pointer transition-colors duration-300 flex items-center gap-3"
-                    onClick={() => handleSuggestionClick(suggestion)}
+                    onClick={async () => {
+                      const searchTerm = suggestion.snippet.title;
+                      setNewVideoUrl(searchTerm);
+                      setShowSuggestions(false);
+                      setLastSearchTerm(searchTerm);
+                      await handleSearch(searchTerm);
+                    }}
                   >
                     <div className="text-gray-400 flex-shrink-0">
                       <svg
@@ -918,14 +1040,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[600px] bg-[#1e1e1e] rounded-xl shadow-2xl z-50 flex flex-col">
             <div className="flex flex-col items-center justify-between p-4 border-b border-[#404040]">
               <h2 className="text-lg font-semibold text-white mb-2">Resultados da Busca</h2>
-              <p className="text-base text-[#e1aa1e] font-medium">
-                {lastSearchTerm}
+              <p className="text-xl text-[#e1aa1e] font-semibold tracking-wide">
+                {lastSearchTerm || ''}
               </p>
+              <div className="flex items-center gap-4 mt-2">
               <button
-                onClick={() => {
-                  setIsSearching(false);
-                  // Não limpa o input nem os resultados ao fechar o modal
-                }}
+                  onClick={handlePrevPage}
+                  disabled={currentPage === 1}
+                  className={`px-4 py-1.5 rounded-lg transition-all duration-300 ${
+                    currentPage === 1
+                      ? 'bg-[#2d2d2d] text-gray-500 cursor-not-allowed'
+                      : 'bg-[#2d2d2d] text-[#e1aa1e] hover:bg-[#363636]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                    Lista Anterior
+                  </span>
+                </button>
+                <span className="text-gray-400 font-medium">
+                  Lista {currentPage}
+                </span>
+                <button
+                  onClick={handleNextPage}
+                  className="px-4 py-1.5 rounded-lg bg-[#2d2d2d] text-[#e1aa1e] hover:bg-[#363636] transition-all duration-300"
+                >
+                  <span className="flex items-center gap-2">
+                    Próxima Lista
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </span>
+                </button>
+              </div>
+              <button
+                onClick={() => setIsSearching(false)}
                 className="absolute right-4 top-4 p-2 hover:bg-[#2d2d2d] rounded-lg transition-colors duration-300"
               >
                 <svg

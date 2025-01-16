@@ -7,6 +7,15 @@ export const YOUTUBE_API_KEYS = [
   process.env.REACT_APP_YOUTUBE_API_KEY_6 || '',
 ].filter(key => key !== '');
 
+const geminiKey = process.env.REACT_APP_GEMINI_API_KEY;
+
+export const TTS_API_KEYS = {
+  google: process.env.REACT_APP_GOOGLE_TTS_API_KEY || '',
+  gemini: process.env.REACT_APP_GEMINI_API_KEY || '',
+  elevenlabs: process.env.REACT_APP_ELEVENLABS_API_KEY || '',
+  azure: process.env.REACT_APP_AZURE_TTS_API_KEY || ''
+};
+
 export const getApiKeys = () => [...YOUTUBE_API_KEYS];
 
 const CACHE_DURATION = 1000 * 60 * 60; // 1 hora
@@ -19,24 +28,23 @@ interface CacheItem {
 const cache = new Map<string, CacheItem>();
 const apiUsage = new Map<string, number>();
 
-// Variável para armazenar a última API que funcionou
 let lastWorkingApiKey: string | null = null;
+
+export const BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://imperiofitness.netlify.app'
+  : 'http://localhost:3000';
 
 export const tryFetchWithFallback = async (url: string, apiKeys: readonly string[]) => {
   let lastError = null;
   
-  // Reorganiza as APIs para tentar primeiro a última que funcionou
   const sortedApiKeys = [...apiKeys].sort((a, b) => {
     if (a === lastWorkingApiKey) return -1;
     if (b === lastWorkingApiKey) return 1;
     return 0;
   });
 
-  console.log('Ordem das APIs:', sortedApiKeys.map(key => key.substring(0, 8) + '...'));
-
   for (const apiKey of sortedApiKeys) {
     try {
-      console.log('Tentando API:', apiKey.substring(0, 8) + '...');
       const finalUrl = url.replace('API_KEY', apiKey);
       
       const response = await fetch(finalUrl);
@@ -44,27 +52,19 @@ export const tryFetchWithFallback = async (url: string, apiKeys: readonly string
 
       if (!response.ok) {
         const errorMessage = data.error?.message || 'Unknown error';
-        console.error(`API ${apiKey.substring(0, 8)}... falhou:`, errorMessage);
-        
         if (errorMessage.includes('quota')) {
-          console.log('Quota excedida, tentando próxima API...');
           throw new Error(`Quota excedida para API ${apiKey.substring(0, 8)}...`);
         }
-        
         throw new Error(errorMessage);
       }
       
       lastWorkingApiKey = apiKey;
-      console.log('API funcionou e foi salva:', apiKey.substring(0, 8) + '...');
-      
       trackApiUsage(apiKey);
       return data;
     } catch (error) {
-      console.error(`API ${apiKey.substring(0, 8)}... falhou com erro:`, error);
       lastError = error;
       
       if (apiKey === lastWorkingApiKey) {
-        console.log('Limpando registro da última API funcionante');
         lastWorkingApiKey = null;
       }
       
@@ -72,7 +72,6 @@ export const tryFetchWithFallback = async (url: string, apiKeys: readonly string
     }
   }
   
-  console.error('Todas as APIs falharam. Último erro:', lastError);
   throw lastError;
 };
 
@@ -81,7 +80,6 @@ export const fetchWithCache = async (url: string, apiKeys: readonly string[]) =>
   const cached = cache.get(cacheKey);
   
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    console.log('Usando dados do cache para:', cacheKey);
     return cached.data;
   }
 
@@ -93,10 +91,8 @@ export const fetchWithCache = async (url: string, apiKeys: readonly string[]) =>
 export const trackApiUsage = (apiKey: string) => {
   const current = apiUsage.get(apiKey) || 0;
   apiUsage.set(apiKey, current + 1);
-  console.log(`API Usage - ${apiKey.substring(0, 8)}...`, current + 1);
 };
 
 export const clearCache = () => {
   cache.clear();
-  console.log('Cache limpo');
-}; 
+};

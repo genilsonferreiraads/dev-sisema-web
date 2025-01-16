@@ -22,6 +22,7 @@ module.exports = {
         'wave-6': 'wave-expand 4s cubic-bezier(0.4, 0, 0.6, 1) infinite 4s',
         'pulse-ring': 'pulse-ring 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'glow': 'glow 3s ease-in-out infinite',
+        fadeInScale: 'fadeInScale 0.3s ease-out forwards'
       },
       keyframes: {
         zoom: {
@@ -75,6 +76,10 @@ module.exports = {
           '50%': {
             boxShadow: '0 0 30px rgba(225,170,30,0.5), 0 0 60px rgba(225,170,30,0.4), 0 0 90px rgba(225,170,30,0.3)',
           }
+        },
+        fadeInScale: {
+          '0%': { opacity: '0', transform: 'scale(0.95)' },
+          '100%': { opacity: '1', transform: 'scale(1)' }
         }
       }
     },
