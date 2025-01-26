@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { User } from './types/auth';
 import { authService } from './lib/auth';
@@ -27,6 +27,10 @@ const App: React.FC = () => {
   const [isAddingVideo, setIsAddingVideo] = useState(false);
   const [error, setError] = useState<string>('');
   const [isClipboardLoading, setIsClipboardLoading] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isInitialLoadWithoutConnection] = useState(!navigator.onLine);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
+  const checkConnectionInterval = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
     checkUser();
@@ -36,8 +40,16 @@ const App: React.FC = () => {
       temporaryAudioService.cleanupExpiredAudios();
     }, 60000); // Executa a cada minuto
 
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     return () => {
       clearInterval(cleanupInterval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
@@ -207,21 +219,129 @@ const App: React.FC = () => {
     }
   };
 
+  // Função para verificar a conexão
+  const checkConnection = async () => {
+    try {
+      setIsCheckingConnection(true);
+      const response = await fetch('https://www.google.com/favicon.ico', {
+        mode: 'no-cors',
+        cache: 'no-store'
+      });
+      if (response) {
+        window.location.reload();
+      }
+    } catch (error) {
+      console.log('Ainda sem conexão...');
+    } finally {
+      setIsCheckingConnection(false);
+    }
+  };
+
+  // Inicia a verificação automática quando estiver offline
+  useEffect(() => {
+    if (isInitialLoadWithoutConnection) {
+      checkConnectionInterval.current = setInterval(checkConnection, 5000); // Verifica a cada 5 segundos
+    }
+    return () => {
+      if (checkConnectionInterval.current) {
+        clearInterval(checkConnectionInterval.current);
+      }
+    };
+  }, [isInitialLoadWithoutConnection]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#1e1e1e] flex items-center justify-center">
-        <div className="relative flex items-center justify-center">
-          {/* Spinner principal */}
-          <div className="w-16 h-16 border-4 border-[#404040] border-t-[#e1aa1e] rounded-full animate-spin"></div>
+        <div className="text-center">
+          <img src={logo} alt="Logo" className="w-24 h-24 mx-auto mb-4" />
+          <div className="animate-spin w-8 h-8 border-4 border-[#e1aa1e] border-t-transparent rounded-full mx-auto"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isInitialLoadWithoutConnection) {
+    return (
+      <div className="min-h-screen bg-[#1e1e1e] flex items-center justify-center p-4">
+        <div className="relative">
+          {/* Efeito de brilho de fundo */}
+          <div className="absolute -inset-1 bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] rounded-lg opacity-20 blur-lg animate-pulse"></div>
           
-          {/* Logo no centro */}
-          <div className="absolute">
-            <div className="w-8 h-8 rounded-full bg-[#1e1e1e] border border-[#404040] flex items-center justify-center overflow-hidden">
-              <img 
-                src={logo} 
-                alt="Império Fitness Logo" 
-                className="w-6 h-6 object-contain"
-              />
+          <div className="relative bg-[#2d2d2d] p-8 rounded-lg shadow-lg max-w-md w-full border border-[#404040] backdrop-blur-xl">
+            {/* Cabeçalho com Logo e Status */}
+            <div className="text-center mb-8">
+              <div className="relative w-24 h-24 mx-auto mb-6">
+                <div className="absolute inset-0 bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] rounded-full opacity-20 animate-ping"></div>
+                <div className="relative w-24 h-24 rounded-full bg-[#1e1e1e] border-2 border-[#404040] p-4 flex items-center justify-center">
+                  <img 
+                    src={logo} 
+                    alt="Logo" 
+                    className="w-16 h-16 object-contain transform hover:scale-110 transition-transform duration-300"
+                  />
+                </div>
+              </div>
+              
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] bg-clip-text text-transparent mb-3">
+                Modo Offline
+              </h2>
+              
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#1e1e1e] border border-[#404040]">
+                <div className="relative">
+                  <svg className="w-5 h-5 text-[#e1aa1e]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
+                  </svg>
+                  <div className="absolute -inset-1 bg-[#e1aa1e] opacity-20 blur animate-pulse rounded-full"></div>
+                </div>
+                <span className="text-gray-300">Sem conexão com a internet</span>
+              </div>
+            </div>
+            
+            {/* Mensagem Principal */}
+            <div className="relative mb-8">
+              <div className="absolute -inset-1 bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] opacity-10 blur-sm rounded-lg"></div>
+              <div className="relative bg-[#1e1e1e] p-4 rounded-lg border border-[#404040]">
+                <p className="text-gray-300 text-center leading-relaxed">
+                  Você está no modo offline, mas não se preocupe! 
+                  <span className="block mt-1 text-[#e1aa1e]">
+                    A página será recarregada automaticamente quando a conexão for restabelecida.
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* Status de Verificação e Botão */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-center text-sm">
+                {isCheckingConnection ? (
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1e1e1e] border border-[#404040]">
+                    <div className="w-4 h-4 relative">
+                      <div className="absolute inset-0 border-2 border-[#e1aa1e] border-t-transparent rounded-full animate-spin"></div>
+                      <div className="absolute inset-0 bg-[#e1aa1e] opacity-20 blur animate-pulse rounded-full"></div>
+                    </div>
+                    <span className="text-[#e1aa1e]">Verificando conexão...</span>
+                  </div>
+                ) : (
+                  <div className="px-4 py-2 rounded-full bg-[#1e1e1e] border border-[#404040] text-gray-400">
+                    Verificando conexão a cada 5 segundos
+                  </div>
+                )}
+              </div>
+
+              <button 
+                onClick={checkConnection}
+                disabled={isCheckingConnection}
+                className={`w-full relative group ${isCheckingConnection ? 'cursor-not-allowed' : ''}`}
+              >
+                <div className="absolute -inset-1 bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] rounded-lg opacity-70 group-hover:opacity-100 blur transition duration-300"></div>
+                <div className={`relative bg-[#e1aa1e] hover:bg-[#e1aa1e]/90 px-6 py-3 rounded-lg flex items-center justify-center gap-2 transition-all duration-300 transform group-hover:scale-[0.99] ${isCheckingConnection ? 'opacity-50' : ''}`}>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span className="font-medium text-gray-900">
+                    {isCheckingConnection ? 'Verificando...' : 'Tentar Reconectar'}
+                  </span>
+                </div>
+              </button>
             </div>
           </div>
         </div>
@@ -230,6 +350,15 @@ const App: React.FC = () => {
   }
 
   if (!user) {
+    // Se estiver na rota /audios, permite o acesso mesmo sem autenticação
+    if (window.location.pathname.startsWith('/audios')) {
+      return (
+        <Routes>
+          <Route path="/audios" element={<AudioPreview />} />
+          <Route path="*" element={<Login onLoginSuccess={checkUser} />} />
+        </Routes>
+      );
+    }
     return <Login onLoginSuccess={checkUser} />;
   }
 

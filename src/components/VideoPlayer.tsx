@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { videoService, VideoData } from '../lib/supabase';
 import VideoSidebar from './VideoSidebar';
 import ClipboardAlert from './ClipboardAlert';
@@ -28,7 +28,7 @@ interface YouTubeSearchResult {
   };
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlaying, pendingVideoId }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlaying, pendingVideoId }): JSX.Element => {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [error, setError] = useState<string>('');
@@ -57,9 +57,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const [nextPageToken, setNextPageToken] = useState<string>('');
   const [prevPageTokens, setPrevPageTokens] = useState<string[]>([]);
   const videosPerPage = 9; // 3x3 grid
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isChangingVideo, setIsChangingVideo] = useState(false);
+  const [autoplayAttempts, setAutoplayAttempts] = useState(0);
+  const maxAutoplayAttempts = 10; // Número máximo de tentativas
+  const autoplayRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadVideos();
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   const loadYouTubeAPI = () => {
@@ -101,13 +119,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
               setPlayer(event.target);
               setIsPlayerReady(true);
               
-              const audioElement = document.querySelector('audio');
-              const isAudioPlaying = audioElement && !audioElement.paused;
-              event.target.setVolume(isAudioPlaying ? 10 : 100);
+              // Mantém o volume atual se estiver em transição
+              if (!isChangingVideo) {
+                const audioElement = document.querySelector('audio');
+                const isAudioPlaying = audioElement && !audioElement.paused;
+                event.target.setVolume(isAudioPlaying ? 10 : 100);
+              }
+              
+              if (isChangingVideo) {
+                attemptAutoplay();
+              }
             },
             onStateChange: handleStateChange,
             onError: (error: any) => {
               console.error('Erro no player:', error);
+              setIsChangingVideo(false);
+              if (autoplayRef.current) {
+                clearInterval(autoplayRef.current);
+              }
             }
           },
           playerVars: {
@@ -118,14 +147,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
             controls: 1,
             rel: 0,
             modestbranding: 1,
-            autoplay: 0
+            autoplay: isChangingVideo ? 1 : 0
           }
         });
+
+        setPlayer(newPlayer);
       } catch (error) {
         console.error('Erro ao inicializar player:', error);
+        setIsChangingVideo(false);
       }
     } catch (error) {
       console.error('Erro ao carregar API:', error);
+      setIsChangingVideo(false);
     }
   };
 
@@ -503,7 +536,65 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const handleStateChange = (event: any) => {
     if (isInternalStateChange) return;
 
-    if (event.data === 0) {
+    if (event.data === 0) { // Video ended
+      setIsChangingVideo(true);
+      setAutoplayAttempts(0);
+      
+      const currentIndex = videos.findIndex(v => v.id === (selectedVideo?.id || videos[0]?.id));
+      const nextVideo = currentIndex < videos.length - 1 
+        ? videos[currentIndex + 1]
+        : videos[0];
+
+      if (nextVideo) {
+        if (user?.id) {
+          videoService.saveVideoHistory(user.id, nextVideo.id).catch(console.error);
+          setLastWatchedVideos(prev => {
+            const newOrder = [nextVideo.id, ...prev.filter(id => id !== nextVideo.id)];
+            return newOrder.slice(0, videos.length);
+          });
+          
+          setVideos(prev => [
+            nextVideo,
+            ...prev.filter(v => v.id !== nextVideo.id)
+          ]);
+        }
+
+        // Salva o volume atual antes de mudar o vídeo
+        const currentVolume = player?.getVolume() || 100;
+        const audioElement = document.querySelector('audio');
+        const isAudioPlaying = audioElement && !audioElement.paused;
+
+        // Previne que o áudio seja pausado durante a transição
+        setIsInternalStateChange(true);
+        
+        // Limpa o player atual antes de criar um novo
+        if (player) {
+          try {
+            player.destroy();
+          } catch (error) {
+            console.error('Erro ao destruir player:', error);
+          }
+        }
+        
+        setSelectedVideo(nextVideo);
+        setPlayer(null);
+        setIsPlayerReady(false);
+        setIsPlaying(true);
+
+        // Reinicializa o player com o novo vídeo
+        setTimeout(() => {
+          initializePlayer();
+        }, 100);
+
+        // Configura um efeito para restaurar o volume após a mudança
+        setTimeout(() => {
+          if (player && isPlayerReady) {
+            player.setVolume(isAudioPlaying ? 10 : currentVolume);
+          }
+          setIsInternalStateChange(false);
+        }, 1000);
+      }
+
       if (pendingVideoId) {
         const pendingVideo = videos.find(v => v.id === pendingVideoId);
         if (pendingVideo) {
@@ -511,12 +602,41 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
       onEnded();
-    } else if (event.data === 1) {
+    } else if (event.data === 1) { // Video started playing
       const audioElement = document.querySelector('audio');
       const isAudioPlaying = audioElement && !audioElement.paused;
       
       if (isAudioPlaying && player) {
         player.setVolume(10);
+      }
+      
+      setIsPlaying(true);
+      setIsChangingVideo(false);
+      
+      if (autoplayRef.current) {
+        clearInterval(autoplayRef.current);
+      }
+    } else if (event.data === 2) { // Video was paused
+      if (!isChangingVideo && !isInternalStateChange) {
+        setIsPlaying(false);
+      }
+    } else if (event.data === 5 || event.data === -1) { // Video cued/loaded or unstarted
+      if (isChangingVideo) {
+        const audioElement = document.querySelector('audio');
+        const isAudioPlaying = audioElement && !audioElement.paused;
+        
+        if (player && isPlayerReady) {
+          player.setVolume(isAudioPlaying ? 10 : 100);
+        }
+        
+        attemptAutoplay();
+      }
+    } else if (event.data === 3) { // Video buffering
+      // Se estiver em transição e bufferizando, tenta reproduzir novamente após um delay
+      if (isChangingVideo) {
+        setTimeout(() => {
+          attemptAutoplay();
+        }, 1000);
       }
     }
   };
@@ -543,13 +663,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
   useEffect(() => {
     const handleAudioPlay = () => {
-      if (isPlayerReady) {
+      if (isPlayerReady && !isInternalStateChange) {
         fadeIframeVolume(1, 0.10, 500);
       }
     };
 
     const handleAudioStop = () => {
-      if (isPlayerReady) {
+      if (isPlayerReady && !isInternalStateChange) {
         fadeIframeVolume(0.10, 1, 500);
       }
     };
@@ -561,13 +681,36 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       window.removeEventListener('audioPlay', handleAudioPlay);
       window.removeEventListener('audioStop', handleAudioStop);
     };
-  }, [isPlayerReady]);
+  }, [isPlayerReady, isInternalStateChange]);
 
   useEffect(() => {
     if (selectedVideo || videos[0]) {
       setPlayer(null);
       setIsPlayerReady(false);
       initializePlayer();
+
+      // Se estiver em transição, tenta reproduzir em diferentes momentos
+      if (isChangingVideo) {
+        const attempts = [500, 1000, 1500, 2000, 2500];
+        const timeouts: NodeJS.Timeout[] = [];
+
+        attempts.forEach(delay => {
+          const timeoutId = setTimeout(() => {
+            if (player && isPlayerReady && isChangingVideo) {
+              try {
+                player.playVideo();
+              } catch (error) {
+                console.error(`Erro ao iniciar vídeo (delay ${delay}ms):`, error);
+              }
+            }
+          }, delay);
+          timeouts.push(timeoutId);
+        });
+
+        return () => {
+          timeouts.forEach(clearTimeout);
+        };
+      }
     }
   }, [selectedVideo?.url, videos[0]?.url]);
 
@@ -578,7 +721,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       try {
         if (isPlaying) {
           player.playVideo();
-        } else {
+        } else if (!isChangingVideo) { // Only pause if not changing videos
           const audioElement = document.querySelector('audio');
           const isAudioPlaying = audioElement && !audioElement.paused;
           
@@ -595,7 +738,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     const timeoutId = setTimeout(handlePlayerState, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [isPlaying, player, isPlayerReady]);
+  }, [isPlaying, player, isPlayerReady, isChangingVideo]);
 
   const handlePopupVideo = async (url: string) => {
     if (!url.trim()) {
@@ -939,6 +1082,87 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     }
   };
 
+  // Função auxiliar para tentar reproduzir o vídeo
+  const attemptAutoplay = useCallback(() => {
+    if (player && isPlayerReady && isChangingVideo) {
+      try {
+        const audioElement = document.querySelector('audio');
+        const isAudioPlaying = audioElement && !audioElement.paused;
+        
+        if (isAudioPlaying) {
+          player.setVolume(10);
+        }
+        
+        setIsInternalStateChange(true);
+        
+        // Verifica se o player está em um estado válido antes de tentar reproduzir
+        const playerState = player.getPlayerState();
+        if (playerState !== -1 && playerState !== 5) {
+          setTimeout(() => {
+            player.playVideo();
+          }, 100);
+        } else {
+          player.playVideo();
+        }
+        
+        setTimeout(() => setIsInternalStateChange(false), 500);
+        return true;
+      } catch (error) {
+        console.error('Erro ao tentar reprodução automática:', error);
+        setIsInternalStateChange(false);
+        return false;
+      }
+    }
+    return false;
+  }, [player, isPlayerReady, isChangingVideo]);
+
+  // Efeito para gerenciar tentativas de reprodução automática
+  useEffect(() => {
+    if (isChangingVideo && player && isPlayerReady) {
+      const startAutoplayAttempts = () => {
+        if (autoplayRef.current) {
+          clearInterval(autoplayRef.current);
+        }
+
+        setAutoplayAttempts(0);
+        
+        // Primeira tentativa imediata
+        attemptAutoplay();
+        
+        autoplayRef.current = setInterval(() => {
+          setAutoplayAttempts(prev => {
+            if (prev >= maxAutoplayAttempts) {
+              if (autoplayRef.current) {
+                clearInterval(autoplayRef.current);
+              }
+              setIsChangingVideo(false);
+              console.log('Máximo de tentativas de reprodução atingido');
+              return prev;
+            }
+
+            const success = attemptAutoplay();
+            if (success) {
+              if (autoplayRef.current) {
+                clearInterval(autoplayRef.current);
+              }
+              return prev;
+            }
+
+            return prev + 1;
+          });
+        }, 500); // Aumentado para 500ms para dar mais tempo entre tentativas
+      };
+
+      startAutoplayAttempts();
+
+      return () => {
+        if (autoplayRef.current) {
+          clearInterval(autoplayRef.current);
+        }
+      };
+    }
+  }, [isChangingVideo, player, isPlayerReady, attemptAutoplay]);
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3">
       <form onSubmit={handleSubmit} className="mb-3">
@@ -970,7 +1194,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                 type="text"
                 value={newVideoUrl}
                 onChange={handleInputChange}
-                placeholder="Cole uma URL do YouTube ou digite para buscar vídeos"
+                placeholder="Digite sua busca ou cole uma URL do YouTube"
                 className="w-full bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded-full px-10 py-2.5 focus:border-[#e1aa1e] focus:outline-none pr-10 transition-all duration-300 focus:shadow-[0_0_10px_rgba(225,170,30,0.3)]"
                 disabled={isLoading}
               />
@@ -1275,6 +1499,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                 title={`Video ${selectedVideo?.id || videos[0]?.id}`}
               />
             </div>
+            {!isOnline && (
+              <div className="mt-3 p-4 bg-[#2d2d2d] border border-[#404040] rounded-lg flex items-center gap-3 animate-fade-in">
+                <div className="flex-shrink-0 w-10 h-10 bg-[#e1aa1e]/10 rounded-full flex items-center justify-center">
+                  <svg className="w-6 h-6 text-[#e1aa1e]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-[#e1aa1e] font-medium mb-1">Sem conexão com a internet</h3>
+                  <p className="text-sm text-gray-400">Verifique sua conexão e tente novamente. O vídeo continuará automaticamente quando a conexão for restabelecida.</p>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center p-6 text-gray-400 bg-[#2d2d2d] rounded-lg border border-[#404040]">

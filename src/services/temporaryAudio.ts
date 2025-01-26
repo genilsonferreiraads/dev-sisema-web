@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { TTS_API_KEYS } from '../config/api';
 
 export const temporaryAudioService = {
   async uploadAudio(audioBlob: Blob): Promise<string> {
@@ -91,6 +92,40 @@ export const temporaryAudioService = {
       }
     } catch (error) {
       console.error('Erro ao limpar áudios expirados:', error);
+    }
+  },
+
+  async createTemporaryAudio(text: string): Promise<{ url: string }> {
+    try {
+      // Gera o áudio usando a API da Azure
+      const response = await fetch(
+        'https://brazilsouth.tts.speech.microsoft.com/cognitiveservices/v1',
+        {
+          method: 'POST',
+          headers: {
+            'Ocp-Apim-Subscription-Key': TTS_API_KEYS.azure,
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
+          },
+          body: `<speak version='1.0' xml:lang='pt-BR'>
+            <voice xml:lang='pt-BR' xml:gender='Female' name='pt-BR-FranciscaNeural'>
+              ${text}
+            </voice>
+          </speak>`
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Erro ao gerar áudio com Azure');
+      }
+
+      const audioBlob = await response.blob();
+      const url = await this.uploadAudio(audioBlob);
+
+      return { url };
+    } catch (error) {
+      console.error('Erro ao criar áudio temporário:', error);
+      throw error;
     }
   }
 }; 

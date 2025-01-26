@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { audioService, AudioData } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 import '../styles/animations.css';
@@ -18,7 +18,7 @@ interface AudioPlayerProps {
   setIsPlaying: (playing: boolean) => void;
 }
 
-const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlaying }) => {
+const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalIsPlaying, setIsPlaying: setExternalIsPlaying }) => {
   const [audios, setAudios] = useState<AudioData[]>([]);
   const [currentAudio, setCurrentAudio] = useState<AudioData | null>(null);
   const [progress, setProgress] = useState(0);
@@ -58,6 +58,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const [pinnedAudios, setPinnedAudios] = useState<string[]>([]);
   const [showPinConfirm, setShowPinConfirm] = useState<string | null>(null);
   const [pinConfirmPosition, setPinConfirmPosition] = useState<{ x: number; y: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [duration, setDuration] = useState(0);
+  const [showOfflineMessage, setShowOfflineMessage] = useState(false);
+  const progressBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadAudios();
@@ -219,13 +224,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           });
 
           setCurrentAudio(audioData);
-          setIsPlaying(true);
+          setExternalIsPlaying(true);
 
           try {
             await audioRef.current.play();
           } catch (error) {
             isPlayingRef.current = false;
-            setIsPlaying(false);
+            setExternalIsPlaying(false);
             return;
           }
         }
@@ -233,12 +238,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         // Libera para próxima reprodução quando este áudio terminar
         audioRef.current?.addEventListener('ended', () => {
           isPlayingRef.current = false;
-          setIsPlaying(false);
+          setExternalIsPlaying(false);
         }, { once: true });
 
       } catch (error) {
         isPlayingRef.current = false;
-        setIsPlaying(false);
+        setExternalIsPlaying(false);
       }
     };
 
@@ -283,65 +288,76 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
   const handleAudioEnd = () => {
     isPlayingRef.current = false;
-    setIsPlaying(false);
+    setExternalIsPlaying(false);
     if (onEnded) {
       onEnded();
     }
   };
 
-  const togglePlay = (audio: AudioData) => {
-    // Se clicou em um áudio diferente do atual
-    if (currentAudio?.id !== audio.id) {
-      // Para o áudio atual se estiver tocando
-      if (audioRef.current) {
-        audioRef.current.pause();
-        isPlayingRef.current = false;
-        setIsPlaying(false);
+  const handlePlayPause = async () => {
+    try {
+      if (!audioRef.current) return;
+
+      if (externalIsPlaying) {
+        await audioRef.current.pause();
+        setExternalIsPlaying(false);
+      } else {
+        try {
+          const playPromise = audioRef.current.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+            setExternalIsPlaying(true);
+          }
+        } catch (error) {
+          console.error('Erro ao reproduzir áudio:', error);
+          setExternalIsPlaying(false);
+        }
       }
-      // Define o novo áudio
+    } catch (error) {
+      console.error('Erro ao controlar reprodução:', error);
+      setExternalIsPlaying(false);
+    }
+  };
+
+  const playAudio = () => {
+    if (!audioRef.current) return;
+    
+    audioRef.current.play()
+      .then(() => setExternalIsPlaying(true))
+      .catch(error => {
+        console.error('Erro ao reproduzir áudio:', error);
+        setExternalIsPlaying(false);
+      });
+  };
+
+  const togglePlay = (audio: AudioData) => {
+    if (!audioRef.current) return;
+
+    if (currentAudio?.id !== audio.id) {
+      // Novo áudio selecionado
+      if (currentAudio) {
+        audioRef.current.pause();
+      }
       setCurrentAudio(audio);
       
-      // Se não tiver timer ativo, inicia a reprodução manualmente
-      if (!audioTimers[audio.id]) {
-        if (audioRef.current) {
-          audioRef.current.src = audio.url;
-          audioRef.current.currentTime = 0;
-          
-          // Aguarda o áudio estar pronto antes de reproduzir
-          audioRef.current.addEventListener('canplay', () => {
-            if (!isPlayingRef.current) {
-              isPlayingRef.current = true;
-              setIsPlaying(true);
-              audioRef.current?.play().catch(() => {
-                isPlayingRef.current = false;
-                setIsPlaying(false);
-              });
-            }
-          }, { once: true });
-        }
-      }
+      // Remove qualquer listener anterior
+      audioRef.current.removeEventListener('loadeddata', playAudio);
+      
+      // Define o novo src
+      audioRef.current.src = audio.url;
+      
+      // Adiciona o listener para reproduzir quando o áudio estiver pronto
+      audioRef.current.addEventListener('loadeddata', playAudio, { once: true });
+      
+      // Inicia o carregamento
+      audioRef.current.load();
     } else {
-      // Se clicou no mesmo áudio
-      if (isPlayingRef.current) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-        }
+      // Mesmo áudio - toggle play/pause
+      if (!externalIsPlaying) {
+        playAudio();
       } else {
-        if (audioRef.current) {
-          // Se o áudio terminou, volta para o início
-          if (audioRef.current.ended) {
-            audioRef.current.currentTime = 0;
-          }
-          
-          isPlayingRef.current = true;
-          setIsPlaying(true);
-          audioRef.current.play().catch(() => {
-            isPlayingRef.current = false;
-            setIsPlaying(false);
-          });
-        }
+        audioRef.current.pause();
+        setExternalIsPlaying(false);
       }
     }
   };
@@ -437,7 +453,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
   const stopRepeatTimer = async (audioId: string) => {
     // Não para o timer se o áudio estiver tocando
-    if (currentAudio?.id === audioId && isPlaying) {
+    if (currentAudio?.id === audioId && externalIsPlaying) {
       return;
     }
 
@@ -503,7 +519,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       // Atualiza estados locais
       if (currentAudio?.id === audioId) {
         setCurrentAudio(null);
-        setIsPlaying(false);
+        setExternalIsPlaying(false);
       }
 
       if (audioTimers[audioId]) {
@@ -605,47 +621,65 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     onEdit: () => void;
     onCancel: () => void;
     buttonPosition: { x: number; y: number } | null;
-  }) => (
-    <div className="fixed inset-0 z-50" onClick={(e) => {
-      if (e.target === e.currentTarget) onCancel();
-    }}>
+  }) => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+
+    return (
       <div 
-        className="absolute bg-[#2d2d2d] p-4 rounded-lg border border-[#404040] shadow-lg w-64"
-        style={{
-          top: buttonPosition ? `${buttonPosition.y - 80}px` : '50%',
-          left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%',
-          transform: isAnimating ? 'scale(0.9)' : 'scale(1)',
-          opacity: isAnimating ? 0 : 1,
-          transition: 'transform 0.2s ease-out, opacity 0.2s ease-out'
+        className="fixed inset-0 z-50 flex items-center justify-center" 
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onCancel();
         }}
       >
-        <h3 className="text-[#e1aa1e] font-medium text-sm mb-2">Gerenciar Repetição</h3>
-        <p className="text-gray-300 text-xs mb-4">
-          Escolha uma das opções para editar a repetição automática:
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 rounded bg-[#404040] text-xs text-gray-200 hover:bg-[#505050] transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={onEdit}
-            className="px-3 py-1.5 rounded bg-[#e1aa1e]/20 text-xs text-[#e1aa1e] hover:bg-[#e1aa1e]/30 transition-colors"
-          >
-            Editar
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-3 py-1.5 rounded bg-[#e1aa1e] text-xs text-gray-900 hover:bg-[#e1aa1e]/80 transition-colors"
-          >
-            Desativar
-          </button>
+        <div 
+          className={`
+            bg-[#2d2d2d] border border-[#404040] shadow-lg rounded-lg mx-4
+            ${isMobile ? 'w-[280px]' : 'w-64'}
+            p-4
+          `}
+          style={!isMobile ? {
+            position: 'absolute',
+            top: buttonPosition ? `${buttonPosition.y - 80}px` : '50%',
+            left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%'
+          } : undefined}
+        >
+          <h3 className="text-[#e1aa1e] font-medium text-sm mb-2">Gerenciar Repetição</h3>
+          <p className="text-gray-300 text-xs mb-4">
+            Escolha uma das opções para editar a repetição automática:
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              className={`
+                px-3 rounded bg-[#404040] text-gray-200 hover:bg-[#505050] transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={onEdit}
+              className={`
+                px-3 rounded bg-[#e1aa1e]/20 text-[#e1aa1e] hover:bg-[#e1aa1e]/30 transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
+            >
+              Editar
+            </button>
+            <button
+              onClick={onConfirm}
+              className={`
+                px-3 rounded bg-[#e1aa1e] text-gray-900 hover:bg-[#e1aa1e]/80 transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
+            >
+              Desativar
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const SetTimerDialog = ({ 
     audioId, 
@@ -664,19 +698,38 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     inputValue: string;
     onInputChange: (value: string) => void;
   }) => {
+    const inputRef = useRef<HTMLInputElement>(null);
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+
+    const handleConfirm = useCallback(() => {
+      const value = parseInt(inputValue);
+      if (value > 0) {
+        onConfirm(value);
+      }
+    }, [inputValue, onConfirm]);
+
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+      onInputChange(e.target.value);
+    }, [onInputChange]);
+
     return (
-      <div className="fixed inset-0 z-50" onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}>
+      <div 
+        className="fixed inset-0 z-50 flex items-center justify-center" 
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onCancel();
+        }}
+      >
         <div 
-          className="absolute bg-[#2d2d2d] p-4 rounded-lg border border-[#404040] shadow-lg w-64"
-          style={{
+          className={`
+            bg-[#2d2d2d] border border-[#404040] shadow-lg rounded-lg mx-4
+            ${isMobile ? 'w-[280px]' : 'w-64'}
+            p-4
+          `}
+          style={!isMobile ? {
+            position: 'absolute',
             top: buttonPosition ? `${buttonPosition.y - 80}px` : '50%',
-            left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%',
-            transform: isAnimating ? 'scale(0.9)' : 'scale(1)',
-            opacity: isAnimating ? 0 : 1,
-            transition: 'transform 0.2s ease-out, opacity 0.2s ease-out'
-          }}
+            left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%'
+          } : undefined}
         >
           <h3 className="text-[#e1aa1e] font-medium text-sm mb-2">Repetir Áudio</h3>
           <p className="text-gray-300 text-xs mb-3 truncate">
@@ -685,16 +738,19 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           
           <div className="relative mb-4">
             <input
+              ref={inputRef}
               type="number"
+              inputMode="numeric"
+              pattern="[0-9]*"
               min="1"
               value={inputValue}
-              onChange={(e) => onInputChange(e.target.value)}
+              onChange={handleInputChange}
               placeholder="00"
-              className="w-full px-3 py-2 bg-[#1e1e1e] border border-[#404040] rounded text-gray-200 text-center focus:border-[#e1aa1e] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pr-12"
+              className="w-full px-3 py-2 bg-[#1e1e1e] border border-[#404040] rounded text-gray-200 text-center text-sm focus:border-[#e1aa1e] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pr-12"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  const value = parseInt(inputValue);
-                  if (value > 0) onConfirm(value);
+                  e.preventDefault();
+                  handleConfirm();
                 } else if (e.key === 'Escape') {
                   onCancel();
                 }
@@ -708,18 +764,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
           <div className="flex justify-end gap-2">
             <button
+              type="button"
               onClick={onCancel}
-              className="px-3 py-1.5 rounded bg-[#404040] text-xs text-gray-200 hover:bg-[#505050] transition-colors"
+              className={`
+                px-3 rounded bg-[#404040] text-gray-200 hover:bg-[#505050] transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
             >
               Cancelar
             </button>
             <button
-              onClick={() => {
-                const value = parseInt(inputValue);
-                if (value > 0) onConfirm(value);
-              }}
+              type="button"
+              onClick={handleConfirm}
               disabled={!inputValue || parseInt(inputValue) <= 0}
-              className="px-3 py-1.5 rounded bg-[#e1aa1e] text-xs text-gray-900 hover:bg-[#e1aa1e]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`
+                px-3 rounded bg-[#e1aa1e] text-gray-900 hover:bg-[#e1aa1e]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
             >
               Ativar
             </button>
@@ -779,45 +840,62 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     onConfirm: () => void;
     onCancel: () => void;
     buttonPosition: { x: number; y: number } | null;
-  }) => (
-    <div className="fixed inset-0 z-50" onClick={(e) => {
-      if (e.target === e.currentTarget) onCancel();
-    }}>
+  }) => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+
+    return (
       <div 
-        className="absolute bg-[#2d2d2d] p-4 rounded-lg border border-[#404040] shadow-lg w-64"
-        style={{
-          top: buttonPosition ? `${buttonPosition.y - 80}px` : '50%',
-          left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%',
-          transform: isAnimating ? 'scale(0.9)' : 'scale(1)',
-          opacity: isAnimating ? 0 : 1,
-          transition: 'transform 0.2s ease-out, opacity 0.2s ease-out'
+        className="fixed inset-0 z-50 flex items-center justify-center" 
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onCancel();
         }}
       >
-        <h3 className="text-red-500 font-medium text-sm mb-2">Confirmar Exclusão</h3>
-        <p className="text-gray-300 text-xs mb-4">
-          Tem certeza que deseja excluir este áudio?
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 rounded bg-[#404040] text-xs text-gray-200 hover:bg-[#505050] transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-3 py-1.5 rounded bg-red-500 text-xs text-white hover:bg-red-600 transition-colors"
-          >
-            Excluir
-          </button>
+        <div 
+          className={`
+            bg-[#2d2d2d] border border-[#404040] shadow-lg rounded-lg mx-4
+            ${isMobile ? 'w-[280px]' : 'w-64'}
+            p-4
+          `}
+          style={!isMobile ? {
+            position: 'absolute',
+            top: buttonPosition ? `${buttonPosition.y - 80}px` : '50%',
+            left: buttonPosition ? `${buttonPosition.x - 100}px` : '50%'
+          } : undefined}
+        >
+          <h3 className="text-red-500 font-medium text-sm mb-2">Confirmar Exclusão</h3>
+          <p className="text-gray-300 text-xs mb-4">
+            Tem certeza que deseja excluir este áudio?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className={`
+                px-3 rounded bg-[#404040] text-gray-200 hover:bg-[#505050] transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              className={`
+                px-3 rounded bg-red-500 text-white hover:bg-red-600 transition-colors
+                ${isMobile ? 'py-2 text-sm' : 'py-1.5 text-xs'}
+              `}
+            >
+              Excluir
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   useEffect(() => {
     if (audioRef.current && canvasRef.current) {
-      if (isPlaying) {
+      if (externalIsPlaying) {
         audioRef.current.play();
         canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       } else {
@@ -825,7 +903,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       }
     }
-  }, [isPlaying]);
+  }, [externalIsPlaying]);
 
   const animate = () => {
     if (!canvasRef.current || !analyserRef.current) return;
@@ -864,7 +942,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           const value = dataArray[index] / 255.0;
           
           // Amplitude varia com o áudio
-          const amplitude = isPlaying ? 30 * value : 10;
+          const amplitude = externalIsPlaying ? 30 * value : 10;
           
           // Frequência e fase variam com o tempo e posição
           const frequency = 0.02;
@@ -880,7 +958,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
 
         // Gradiente para a onda
         const gradient = ctx.createLinearGradient(0, baseY - 50, 0, baseY + 50);
-        const alpha = isPlaying ? (0.5 - (w - 1) * 0.1) : 0.2;
+        const alpha = externalIsPlaying ? (0.5 - (w - 1) * 0.1) : 0.2;
         
         gradient.addColorStop(0, `rgba(225, 170, 30, 0)`);
         gradient.addColorStop(0.5, `rgba(225, 170, 30, ${alpha})`);
@@ -891,7 +969,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         ctx.stroke();
 
         // Efeito de brilho
-        if (isPlaying) {
+        if (externalIsPlaying) {
           ctx.save();
           ctx.filter = 'blur(4px)';
           ctx.strokeStyle = `rgba(225, 170, 30, ${alpha * 0.5})`;
@@ -902,7 +980,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       }
 
       // Adiciona partículas brilhantes
-      if (isPlaying) {
+      if (externalIsPlaying) {
         for (let i = 0; i < bufferLength; i += 8) {
           const value = dataArray[i] / 255.0;
           if (value > 0.5) {
@@ -1017,6 +1095,28 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
     setShowPinConfirm(audioId);
   };
 
+  useEffect(() => {
+    const audioElement = audioRef.current;
+    
+    if (audioElement) {
+      const handleEnded = () => {
+        setExternalIsPlaying(false);
+        if (onEnded) onEnded();
+      };
+
+      audioElement.addEventListener('ended', handleEnded);
+      
+      return () => {
+        audioElement.removeEventListener('ended', handleEnded);
+      };
+    }
+  }, [onEnded]);
+
+  // Quando o componente montar, garantir que o estado inicial seja correto
+  useEffect(() => {
+    setExternalIsPlaying(false);
+  }, []);
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-4">
       {/* Player Principal com Visualizador */}
@@ -1041,7 +1141,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
           <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
             <div className="relative w-full h-full flex items-center justify-center">
               {/* Círculos de animação */}
-              {isPlaying && (
+              {externalIsPlaying && (
                 <>
                   <div className="absolute inset-0 flex items-center justify-center">
                     {/* Ondas se expandindo */}
@@ -1062,7 +1162,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                   }
                 }}
                 className={`relative z-10 p-4 rounded-full bg-[#e1aa1e] hover:bg-[#e1aa1e]/90 transition-all transform 
-                  hover:scale-105 active:scale-95 shadow-lg ${isPlaying ? 'ring-4 ring-[#e1aa1e]/50 animate-glow' : ''}`}
+                  hover:scale-105 active:scale-95 shadow-lg ${externalIsPlaying ? 'ring-4 ring-[#e1aa1e]/50 animate-glow' : ''}`}
                 disabled={!currentAudio}
               >
                 <svg
@@ -1071,7 +1171,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  {isPlaying ? (
+                  {externalIsPlaying ? (
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -1130,7 +1230,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
               <div className="flex justify-end">
                 <div className="text-right bg-[#2d2d2d] px-3 py-1 rounded border border-[#404040]/50">
                   <div className="text-xs text-gray-400">
-                    Próximo: {nextInfo.nextAudio.title}
+                    Próximo a Reproduzir: {nextInfo.nextAudio.title}
                   </div>
                   {nextInfo.timer && (
                     <div className="text-xs text-[#e1aa1e]">
@@ -1280,7 +1380,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  {isPlaying && currentAudio?.id === audio.id ? (
+                  {externalIsPlaying && currentAudio?.id === audio.id ? (
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -1525,12 +1625,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         onClose={() => setIsTextToSpeechOpen(false)}
         onPlayingChange={(playing: boolean) => {
           setIsTextToSpeechSpeaking(playing);
-          if (playing && audioRef.current && isPlaying) {
+          if (playing && audioRef.current && externalIsPlaying) {
             audioRef.current.pause();
-            setIsPlaying(false);
+            setExternalIsPlaying(false);
           }
         }}
       />
+
+      {showOfflineMessage && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-[#1e1e1e] text-[#e1aa1e] px-4 py-2 rounded-lg border border-[#404040] shadow-lg animate-fade-in">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Reprodução indisponível no modo offline</span>
+          </div>
+        </div>
+      )}
     </div>
     
   );

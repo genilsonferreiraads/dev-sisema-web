@@ -15,11 +15,12 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
   onClose, 
   onPlayingChange
 }) => {
-  const [text, setText] = useState('');
+  const [inputText, setInputText] = useState('');
   const [selectedVoice, setSelectedVoice] = useState<'azure' | 'google' | 'elevenlabs'>('azure');
   const [isTypingAnimation, setIsTypingAnimation] = useState(false);
   const [typingIndex, setTypingIndex] = useState(0);
   const [optimizedText, setOptimizedText] = useState('');
+  const [originalText, setOriginalText] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,106 +103,172 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
       const genAI = new GoogleGenerativeAI(geminiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-      const isInstagramRelated = inputText.toLowerCase().includes('instagram') || 
-                                inputText.toLowerCase().includes('insta') || 
-                                inputText.toLowerCase().includes('@');
+      const ANNOUNCEMENT_PROMPT = `Você é um assistente especializado em criar anúncios profissionais para uma academia. 
 
-      const prompt = `CONTEXTO DE ATUAÇÃO:
-Você é um assistente especializado em ajudar a recepcionista da academia Império Fitness a melhorar os textos dos avisos que serão transmitidos no sistema de som da academia.
+REGRAS ESSENCIAIS:
+1. NUNCA use aspas no texto retornado
+2. NUNCA adicione informações que não foram fornecidas
+3. NUNCA invente nomes ou detalhes
+4. NUNCA altere valores mencionados
+5. Retorne SEMPRE o texto em uma única linha, sem quebras
+6. Use APENAS as informações do texto original
+7. Mantenha EXATAMENTE os nomes mencionados, sem alterá-los
+8. NUNCA omita informações importantes do texto original
 
-SEU PAPEL:
-1. Melhorar a clareza e gramática dos textos
-2. Manter o texto conciso e profissional
-3. NUNCA alterar o significado original do texto da recepcionista
-4. Auxiliar na formatação adequada para sistema de som
-5. Manter o tom adequado para ambiente de academia
+REGRAS ESPECÍFICAS PARA CHAMADAS:
+- Se alguém precisa ser chamado para ir embora:
+  Atenção [nome exato], [motivo exato da chamada]. Por gentileza compareça à recepção.
 
-TIPOS DE AVISOS COMUNS:
-1. Chamadas à recepção:
-   - Chamar alguém para comparecer à recepção
-   - Avisar que alguém está procurando por outra pessoa
-   - Informar sobre objetos esquecidos/perdidos
+Exemplos:
+Input: "atenção manuela vamos embora da academia nossa hora ja deu"
+Output: Atenção Manuela, nossa hora já deu. Por gentileza compareça à recepção.
 
-2. Avisos gerais:
-   - Promoções de produtos da academia
-   - Informações sobre aulas e horários
-   - Comunicados importantes
-   - Avisos sobre funcionamento
+Input: "chame pedro para ir embora pois está atrasado"
+Output: Atenção Pedro, está atrasado. Por gentileza compareça à recepção.
 
-TEXTO A SER MELHORADO:
-"${inputText}"
+REGRAS ESPECÍFICAS PARA VAGAS:
+- Se alguém está procurando candidatos:
+  Atenção Alunos, [nome exato] está procurando uma pessoa para trabalhar na recepção. Aos interessados, por gentileza compareçam à recepção para mais informações.
 
-REGRAS FUNDAMENTAIS:
-1. NUNCA adicione informações que não existem no texto original
-2. NUNCA altere o local mencionado no texto original
-3. NUNCA mencione a recepção se ela não foi citada no texto original
-4. Use APENAS os nomes que aparecem no texto original
-5. Se nenhum local for mencionado, NÃO ADICIONE um local
-6. Se nenhum nome for mencionado, NÃO ADICIONE nomes
-7. Mantenha o tom profissional mas natural, evitando formalidade excessiva
-8. Preserve SEMPRE o significado original do texto da recepcionista
+Exemplos:
+Input: "quero falar que netinho procura uma pessoa para trabalhar aqui na recepçao"
+Output: Atenção Alunos, netinho está procurando uma pessoa para trabalhar na recepção. Aos interessados, por gentileza compareçam à recepção para mais informações.
 
-DIRETRIZES PARA CHAMADAS À RECEPÇÃO:
-1. Sempre comece com "Atenção"
-2. Use variações naturais para solicitar a presença:
-   - "compareça"
-   - "dirija-se"
-   - "venha"
-   - "apresente-se"
-   - "aguardamos você"
-3. Mantenha um tom cordial usando:
-   - "por favor"
-   - "por gentileza"
-   - "se possível"
-4. Evite repetir sempre o mesmo padrão de frase
-5. Se houver urgência no texto original, mantenha-a usando termos como:
-   - "assim que possível"
-   - "com urgência"
-   - "imediatamente"
-6. Mantenha a ordem: Atenção > Nome > Solicitação > Local
+REGRAS ESPECÍFICAS PARA REDES SOCIAIS:
+- Se o handle/@ NÃO foi informado:
+  Atenção Alunos, convidamos vocês a seguirem nossa academia nas redes sociais para acompanhar todas as novidades. Agradecemos a atenção de todos.
 
-DIRETRIZES PARA OBJETOS PERDIDOS/ESQUECIDOS:
-1. Seja específico mas discreto sobre o objeto
-2. Mantenha a privacidade do aluno
-3. Use frases como:
-   - "retirar seu pertence"
-   - "buscar seu item"
-   - "recuperar seu objeto"
+- Se o handle/@ FOI informado:
+  Atenção Alunos, convidamos vocês a seguirem nossa academia no Instagram @imperiofitness.pe para acompanhar todas as novidades. Agradecemos a atenção de todos.
 
-DIRETRIZES PARA PROMOÇÕES E ANÚNCIOS:
-1. Mantenha valores e percentuais exatos como mencionados
-2. Preserve datas e prazos conforme informado
-3. Enfatize benefícios mantendo as informações originais
-4. Mantenha condições e restrições como especificadas
-5. Use o nome "Império Fitness" quando mencionado no original
+Exemplos:
+Input: "quero convidar os alunos e seguir a nossa academia"
+Output: Atenção Alunos, convidamos vocês a seguirem nossa academia nas redes sociais para acompanhar todas as novidades. Agradecemos a atenção de todos.
 
-DIRETRIZES PARA INSTAGRAM:
-Se o texto mencionar Instagram ou tiver @:
-1. Para exibição: Use "@imperiofitness.pe"
-2. Para fala: Use "arroba império fitness ponto pê é"
-3. Separe os formatos com "|||||"
+Input: "quero convidar os alunos a seguir nosso instagram"
+Output: Atenção Alunos, convidamos vocês a seguirem nossa academia no Instagram @imperiofitness.pe para acompanhar todas as novidades. Agradecemos a atenção de todos.
 
-DIRETRIZES DE FORMATAÇÃO:
-1. Mantenha o texto conciso e objetivo
-2. Use pontuação adequada para pausas naturais
-3. Use linguagem formal mas acessível
-4. Mantenha a ordem das informações como no texto original
+FORMATOS (retorne sem aspas):
 
-IMPORTANTE: 
-1. Retorne apenas o texto melhorado, sem explicações adicionais
-2. Mantenha-se fiel ao significado original do texto da recepcionista
-3. Priorize clareza e objetividade`;
+Para anúncios de produtos sem preço:
+Atenção Alunos, informamos que temos [produto] disponível na recepção/caixa. [Assinatura]
+
+Para anúncios de produtos com preço:
+Atenção Alunos, informamos que temos [produto] disponível na recepção/caixa por R$ [preço exato]. [Assinatura]
+
+Para avisos de organização:
+Atenção Alunos! [pedido direto e conciso]. Agradecemos pela compreensão!
+
+Exemplos de entrada e saída (note que a saída não tem aspas):
+
+Input: "vou falar sobre os pesos para guardar após usar"
+Output: Atenção Alunos! Por gentileza, não se esqueçam de guardar os pesos após o uso. Agradecemos pela compreensão!
+
+Input: "atenção temos energético aqui na recepção"
+Output: Atenção Alunos, informamos que temos energéticos disponíveis na recepção. Saudações, Time Império Fitness.
+
+3. IMPORTANTE - VARIAÇÕES:
+   - NUNCA repita exatamente o mesmo texto dos exemplos
+   - Crie variações naturais mantendo o mesmo sentido
+   - Use sinônimos e estruturas diferentes
+   - Mantenha o tom profissional e educado
+   - Seja criativo nas elaborações mantendo a mensagem clara
+
+4. REGRAS ESPECÍFICAS PARA CHAVES DE ARMÁRIO:
+   - Se a chave está perdida/sumida: "Atenção Alunos, informamos que a chave do armário [número] está sendo procurada. Caso alguém a encontre, favor entregar na recepção. Agradecemos a colaboração."
+   - Se a chave foi encontrada: "Atenção Alunos, foi encontrada a chave do armário [número]. O responsável pode retirá-la na recepção. Agradecemos."
+   - SEMPRE mencione o número do armário
+   - SEMPRE indique que deve ser entregue/retirada na recepção
+   - Mantenha a mensagem direta e clara
+
+Exemplos de variações para chave perdida:
+- Input: "vou falar que tem uma chave do armário 18 esta sumida, deve trazer aqui"
+- Output: "Atenção Alunos, informamos que a chave do armário 18 está sendo procurada. Caso alguém a encontre, favor entregar na recepção. Agradecemos a colaboração."
+- Output: "Atenção Alunos, procura-se a chave do armário 18. Se encontrada, por gentileza entregar na recepção. Agradecemos sua ajuda."
+- Output: "Atenção Alunos, a chave do armário 18 está desaparecida. Pedimos que, se encontrada, seja entregue na recepção. Agradecemos."
+
+5. Para chamados de uma pessoa para outra:
+   Exemplos de variações para o mesmo pedido "chamar João na recepção":
+   - "Atenção João, por gentileza compareça à recepção. Agradecemos sua atenção."
+   - "Atenção João, solicitamos seu comparecimento à recepção. Agradecemos sua colaboração."
+   - "Atenção João, pedimos que se dirija à recepção. Agradecemos sua compreensão."
+
+6. Para anúncios informativos e recomendações:
+   Exemplos de variações para "beber água":
+   - "Atenção Alunos, lembramos da importância de manter-se bem hidratado durante os exercícios. A água é essencial para o bom funcionamento do corpo e melhor desempenho no treino. Agradecemos sua atenção."
+   - "Atenção Alunos, para um treino mais eficiente, não se esqueçam de beber água regularmente. A hidratação adequada ajuda na recuperação muscular e no seu desempenho. Agradecemos a todos."
+   - "Atenção Alunos, mantenham-se hidratados para aproveitar melhor seu treino. Beber água é fundamental para sua saúde e resultados. Agradecemos sua colaboração."
+
+7. Para anúncios sobre objetos perdidos:
+   Exemplos de variações para "procurando chave":
+   - "Atenção Alunos, Maria está procurando sua chave. Se alguém encontrar, favor entregar na recepção. Agradecemos sua ajuda."
+   - "Atenção Alunos, uma chave está sendo procurada por Maria. Caso encontrem, pedimos que entreguem na recepção. Agradecemos a colaboração."
+   - "Atenção Alunos, se alguém encontrou uma chave, Maria está procurando. Por favor, entreguem na recepção. Agradecemos o apoio."
+
+8. Para anúncios promocionais e institucionais:
+   - Comece com "Atenção Alunos"
+   - Seja entusiasmado e convidativo
+   - Destaque o valor/benefício
+   - SEMPRE termine com uma assinatura institucional, variando entre:
+     * "Atenciosamente, Equipe Império Fitness"
+     * "Cordialmente, Equipe Império Fitness"
+     * "Com apreço, Equipe Império Fitness"
+     * "Abraços, Equipe Império Fitness"
+     * "Saudações, Time Império Fitness"
+     * "Grande abraço, Família Império Fitness"
+   
+   Exemplos de variações para promoções:
+   - "Atenção Alunos, aproveitem nossa incrível promoção de Ano Novo! A mensalidade está por apenas R$ 109,90. Não perca esta oportunidade única de investir em sua saúde e bem-estar. Cordialmente, Equipe Império Fitness."
+   - "Atenção Alunos, começamos 2024 com uma oferta especial para você! Mensalidade promocional de R$ 109,90. Garanta já esta condição exclusiva e comece sua jornada de transformação. Com apreço, Equipe Império Fitness."
+   - "Atenção Alunos, super promoção para começar o ano! Aproveite a mensalidade especial de R$ 109,90 e invista em seu bem-estar. Saudações, Time Império Fitness."
+
+9. Para avisos de organização da academia:
+   - Seja direto e conciso
+   - Use frases curtas e objetivas
+   - Mantenha um tom educado mas simples
+   
+   Exemplos de variações para organização de pesos:
+   - "Atenção Alunos! Por gentileza, não se esqueçam de guardar os pesos após o uso. Agradecemos pela compreensão!"
+   - "Atenção Alunos! Pedimos que devolvam os pesos ao seu lugar depois do treino. Obrigado!"
+   - "Atenção Alunos! Colabore com a organização guardando os pesos após usar. Agradecemos!"
+   - "Atenção Alunos! Por favor, recoloquem os pesos no lugar após os exercícios. Grato!"
+   - "Atenção Alunos! Mantenha a academia organizada, guarde os pesos depois do uso. Obrigado!"
+
+REGRAS PARA AVISOS DE ORGANIZAÇÃO:
+1. Mantenha as mensagens curtas e diretas
+2. Use no máximo duas frases
+3. Primeira frase para o pedido
+4. Segunda frase para o agradecimento
+5. Evite explicações longas
+6. Seja educado mas objetivo
+
+REGRAS IMPORTANTES:
+1. NUNCA altere valores ou preços mencionados
+2. Quando o texto mencionar "aqui", "até aqui" ou similar:
+   - Se for um chamado individual, substitua por "à recepção"
+   - Se for venda/produto, substitua por "na recepção" ou "no caixa"
+3. Crie variações naturais do texto mas mantenha:
+   - Preços exatos como informados
+   - Locais específicos (recepção/caixa)
+   - Nomes das pessoas envolvidas
+
+Exemplos de variações para venda de produtos:
+- Input: "vou dizer que quem quiser comprar agua venha aqui ta por 3,00"
+- Output: "Atenção Alunos, informamos que temos água mineral disponível na recepção por R$ 3,00. Mantenha-se hidratado durante seu treino. Saudações, Time Império Fitness."
+- Output: "Atenção Alunos, para sua comodidade, disponibilizamos água mineral no caixa pelo valor de R$ 3,00. Cuide da sua hidratação. Com apreço, Equipe Império Fitness."
+
+IMPORTANTE: Retorne apenas o texto final, sem aspas ou formatação adicional.
+
+TEXTO A SER MELHORADO:`;
+
+      const prompt = ANNOUNCEMENT_PROMPT + `"${inputText}"`;
 
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const processedText = response.text().trim();
       
-      if (isInstagramRelated) {
-        if (!processedText.includes('|||||')) {
-          const displayVersion = processedText.replace(/arroba império fitness ponto pê é/gi, '@imperiofitness.pe...');
-          const speechVersion = processedText.replace(/@imperiofitness\.pe\.\.\./gi, 'arroba império fitness ponto pê é');
-          return `${displayVersion}|||||${speechVersion}`;
-        }
+      if (processedText === inputText) {
+        return processedText;
       }
 
       return processedText;
@@ -240,12 +307,13 @@ IMPORTANTE:
     setCurrentDisclaimer(disclaimers[newIndex]);
   };
 
-  const optimizeText = async () => {
-    if (!text.trim()) {
-      setText('');
+  const optimizeText = async (inputText: string): Promise<string> => {
+    // Sempre usa o texto original para otimização
+    const textToOptimize = originalText || inputText;
+
+    if (!textToOptimize.trim()) {
       setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
-      setOptimizedText('');
-      return;
+      return textToOptimize;
     }
 
     setIsOptimizingText(true);
@@ -253,7 +321,7 @@ IMPORTANTE:
     setIsEditing(false);
 
     try {
-      const optimizedResult = await processTextWithGemini(text);
+      const optimizedResult = await processTextWithGemini(textToOptimize);
       
       // Seleciona um novo disclaimer diferente do anterior
       selectNewDisclaimer();
@@ -262,9 +330,9 @@ IMPORTANTE:
       setOptimizedText(optimizedResult);
       
       // Se for relacionado ao Instagram, trata os formatos especiais
-      if (text.toLowerCase().includes('instagram') || 
-          text.toLowerCase().includes('insta') || 
-          text.toLowerCase().includes('@')) {
+      if (textToOptimize.toLowerCase().includes('instagram') || 
+          textToOptimize.toLowerCase().includes('insta') || 
+          textToOptimize.toLowerCase().includes('@')) {
         const [display, speech] = optimizedResult.split('|||||');
         setDisplayText(display.trim());
         setSpeechText(speech ? speech.trim() : display.trim());
@@ -274,26 +342,29 @@ IMPORTANTE:
       }
 
       // Limpa o texto atual e inicia a animação
-      setText('');
+      setInputText('');
       setIsTypingAnimation(true);
       setTypingIndex(0);
+
+      return optimizedResult;
     } catch (err) {
       console.error('Erro ao otimizar texto:', err);
       setError(err instanceof Error ? err.message : 'Erro ao otimizar texto. Tente novamente.');
+      return textToOptimize;
     } finally {
       setIsOptimizingText(false);
     }
   };
 
   const generateSpeech = async () => {
-    if (!text.trim()) {
-      setText('');
+    if (!inputText.trim()) {
+      setInputText('');
       setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
       setOptimizedText('');
       return;
     }
 
-    const textToSpeak = speechText || text;
+    const textToSpeak = speechText || inputText;
 
     if (textToSpeak === lastGeneratedText && audioUrl) {
       playExistingAudio();
@@ -467,10 +538,7 @@ IMPORTANTE:
   };
 
   const handleClose = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
+    // Remove a pausa do áudio ao fechar
     setIsModalOpen(false);
     onClose();
   };
@@ -508,6 +576,18 @@ IMPORTANTE:
     };
   }, []);
 
+  // Adiciona um efeito para animar o botão quando está falando
+  useEffect(() => {
+    const button = document.querySelector('[data-tts-button]');
+    if (button) {
+      if (isAudioPlaying) {
+        button.classList.add('animate-pulse');
+      } else {
+        button.classList.remove('animate-pulse');
+      }
+    }
+  }, [isAudioPlaying]);
+
   useEffect(() => {
     if (audioUrl) {
       return () => {
@@ -530,25 +610,21 @@ IMPORTANTE:
   useEffect(() => {
     if (isTypingAnimation && typingIndex < displayText.length) {
       const timer = setTimeout(() => {
-        setText(displayText.slice(0, typingIndex + 1));
+        setInputText(displayText.slice(0, typingIndex + 1));
         setTypingIndex(prev => prev + 1);
       }, 30);
       return () => clearTimeout(timer);
     } else if (isTypingAnimation && typingIndex >= displayText.length) {
       setIsTypingAnimation(false);
       setTypingIndex(0);
-      setText(displayText); // Garante que o texto completo seja exibido
+      setInputText(displayText); // Garante que o texto completo seja exibido
     }
   }, [isTypingAnimation, typingIndex, displayText]);
 
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
-    setError(null);
-    if (optimizedText) {
-      setIsEditing(true);
-      setSpeechText(e.target.value); // Atualiza o speechText com o novo texto editado
-      setDisplayText(e.target.value); // Atualiza também o displayText para manter sincronizado
-    }
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value;
+    setInputText(text);
+    setOriginalText(text);
   };
 
   useEffect(() => {
@@ -562,8 +638,8 @@ IMPORTANTE:
   };
 
   const generatePreview = async () => {
-    if (!text.trim()) {
-      setText('');
+    if (!inputText.trim()) {
+      setInputText('');
       setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
       return;
     }
@@ -572,10 +648,9 @@ IMPORTANTE:
     setError(null);
 
     try {
-      const textToSpeak = speechText || text;
+      const textToSpeak = speechText || inputText;
       let audioBlob;
 
-      // Usar a voz selecionada para gerar o áudio
       if (selectedVoice === 'google') {
         if (!TTS_API_KEYS.google) {
           throw new Error('Chave da API do Google não configurada');
@@ -607,10 +682,15 @@ IMPORTANTE:
         );
 
         if (!response.ok) {
-          throw new Error('Erro ao gerar áudio com Google TTS');
+          const errorData = await response.json().catch(() => null);
+          throw new Error(errorData?.error?.message || 'Erro ao gerar áudio com Google TTS');
         }
 
         const { audioContent } = await response.json();
+        if (!audioContent) {
+          throw new Error('Resposta da API do Google não contém dados de áudio');
+        }
+
         audioBlob = new Blob(
           [Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))],
           { type: 'audio/mp3' }
@@ -647,7 +727,6 @@ IMPORTANTE:
 
         audioBlob = await response.blob();
       } else {
-        // Azure (default)
         if (!TTS_API_KEYS.azure) {
           throw new Error('Chave da API da Azure não configurada');
         }
@@ -675,12 +754,9 @@ IMPORTANTE:
 
         audioBlob = await response.blob();
       }
-
-      // Upload do áudio temporário
+      
       const audioUrl = await temporaryAudioService.uploadAudio(audioBlob);
-      const baseUrl = getCurrentBaseUrl();
-      const previewUrl = `${baseUrl}/audios`;
-      setPreviewUrl(previewUrl);
+      setPreviewUrl(audioUrl);
       setShowPreviewModal(true);
     } catch (err) {
       console.error('Erro ao gerar pré-visualização:', err);
@@ -800,8 +876,8 @@ IMPORTANTE:
                   <div className="relative">
                     <textarea
                       ref={textareaRef}
-                      value={text}
-                      onChange={handleTextChange}
+                      value={inputText}
+                      onChange={handleInputChange}
                       onBlur={(e) => e.stopPropagation()}
                       placeholder="Digite aqui o texto que você quer que seja falado..."
                       className="w-full h-32 bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded-lg px-4 py-3 focus:border-[#e1aa1e] focus:outline-none resize-none transition-all duration-300 focus:shadow-[0_0_10px_rgba(225,170,30,0.3)] group-hover:border-[#e1aa1e]/50 pr-10"
@@ -811,11 +887,11 @@ IMPORTANTE:
                     {/* Ícone Otimizar com IA */}
                     <div 
                       onClick={() => {
-                        if (!text.trim()) {
+                        if (!inputText.trim()) {
                           setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
                           return;
                         }
-                        optimizeText();
+                        optimizeText(inputText);
                       }}
                       className={`
                         absolute right-2 top-2 p-2 rounded-md cursor-pointer
@@ -868,8 +944,9 @@ IMPORTANTE:
               <div className="flex items-center gap-3 pt-2">
                 {/* Botão Falar Texto */}
                 <button
+                  data-tts-button
                   onClick={() => {
-                    if (!text.trim()) {
+                    if (!inputText.trim()) {
                       setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
                       return;
                     }
@@ -880,37 +957,47 @@ IMPORTANTE:
                     flex-1 relative overflow-hidden group cursor-pointer ${
                       isLoading || isProcessingText || isTypingAnimation
                         ? 'bg-[#e1aa1e]/50 cursor-not-allowed' 
-                        : 'bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] hover:from-[#f5d485] hover:to-[#e1aa1e]'
+                        : isAudioPlaying
+                          ? 'bg-[#e1aa1e] animate-pulse'
+                          : 'bg-gradient-to-r from-[#e1aa1e] to-[#f5d485] hover:from-[#f5d485] hover:to-[#e1aa1e]'
                     } text-gray-900 px-3 py-2 rounded-lg transition-all duration-300 flex items-center justify-center gap-2 font-medium whitespace-nowrap shadow-lg hover:shadow-[0_0_15px_rgba(225,170,30,0.4)]`}
-                >
-                  {isAudioPlaying ? (
-                    <>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span>Pausar</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg 
-                        className="w-5 h-5 flex-shrink-0 transition-transform duration-300 group-hover:scale-110" 
-                        fill="none" 
-                        stroke="currentColor" 
-                        viewBox="0 0 24 24"
-                      >
-                        <path 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round" 
-                          strokeWidth={2} 
-                          d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" 
-                        />
-                      </svg>
-                      <span className="truncate relative z-10">
-                        {text === lastGeneratedText && audioUrl ? 'Repetir Fala' : 'Falar Texto'}
-                      </span>
-                    </>
-                  )}
-                </button>
+                  >
+                    {isAudioPlaying ? (
+                      <>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Pausar Fala</span>
+                      </>
+                    ) : isLoading ? (
+                      <>
+                        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <span>Iniciando Fala</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg 
+                          className="w-5 h-5 flex-shrink-0 transition-transform duration-300 group-hover:scale-110" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          viewBox="0 0 24 24"
+                        >
+                          <path 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round" 
+                            strokeWidth={2} 
+                            d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" 
+                          />
+                        </svg>
+                        <span className="truncate relative z-10">
+                          {inputText === lastGeneratedText && audioUrl ? 'Repetir Fala' : 'Falar Texto'}
+                        </span>
+                      </>
+                    )}
+                  </button>
 
                 {/* Botão Pré-visualizar */}
                 <button
@@ -983,7 +1070,7 @@ IMPORTANTE:
               </p>
               <div className="bg-white p-4 rounded-lg inline-block">
                 <QRCodeCanvas
-                  value={previewUrl || getCurrentBaseUrl() + '/audios'}
+                  value={getCurrentBaseUrl() + '/audios'}
                   size={200}
                   level="H"
                   includeMargin={true}
@@ -996,7 +1083,7 @@ IMPORTANTE:
 
             <div className="text-center">
               <a
-                href={previewUrl || getCurrentBaseUrl() + '/audios'}
+                href={getCurrentBaseUrl() + '/audios'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[#e1aa1e] hover:text-[#f5d485] transition-colors duration-300"

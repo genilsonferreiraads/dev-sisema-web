@@ -25,7 +25,7 @@ export const authService = {
           display_name: user.display_name
         };
         
-        localStorage.setItem('user', JSON.stringify(userData));
+        sessionStorage.setItem('user', JSON.stringify(userData));
         return userData;
       }
 
@@ -37,10 +37,15 @@ export const authService = {
 
   async getCurrentUser(): Promise<User | null> {
     try {
-      const storedUser = localStorage.getItem('user');
+      const storedUser = sessionStorage.getItem('user');
       if (!storedUser) return null;
 
       const currentUser = JSON.parse(storedUser) as User;
+      
+      // Se não houver conexão, retorna o usuário do sessionStorage
+      if (!navigator.onLine) {
+        return currentUser;
+      }
       
       const { data, error } = await supabase
         .rpc('get_user_data', {
@@ -49,26 +54,43 @@ export const authService = {
 
       if (error || !data) {
         console.error('Erro ao buscar usuário:', error);
-        localStorage.removeItem('user');
+        // Se o erro for de conexão, retorna o usuário do sessionStorage
+        if (error?.message?.includes('Failed to fetch') || 
+            error?.message?.includes('Network Error') || 
+            !navigator.onLine) {
+          return currentUser;
+        }
+        sessionStorage.removeItem('user');
         return null;
       }
 
       // Garante que retornamos um objeto único, não um array
       const updatedUser: User = Array.isArray(data) ? data[0] : data;
       
-      // Atualiza o localStorage com os dados mais recentes
-      localStorage.setItem('user', JSON.stringify(updatedUser));
+      // Atualiza o sessionStorage com os dados mais recentes
+      sessionStorage.setItem('user', JSON.stringify(updatedUser));
       return updatedUser;
 
     } catch (error) {
       console.error('Erro ao obter usuário atual:', error);
-      localStorage.removeItem('user');
+      // Se o erro for de conexão, retorna o usuário do sessionStorage
+      if (error instanceof Error && (
+        error.message.includes('Failed to fetch') || 
+        error.message.includes('Network Error') || 
+        !navigator.onLine
+      )) {
+        const storedUser = sessionStorage.getItem('user');
+        if (storedUser) {
+          return JSON.parse(storedUser) as User;
+        }
+      }
+      sessionStorage.removeItem('user');
       return null;
     }
   },
 
   async signOut() {
-    localStorage.removeItem('user');
+    sessionStorage.removeItem('user');
     await supabase.auth.signOut();
   },
 
@@ -83,8 +105,8 @@ export const authService = {
         throw new Error('Todos os campos são obrigatórios');
       }
 
-      // Pega o usuário atual do localStorage
-      const currentUser = localStorage.getItem('user');
+      // Pega o usuário atual do sessionStorage
+      const currentUser = sessionStorage.getItem('user');
       if (!currentUser) {
         throw new Error('Usuário não autenticado');
       }

@@ -33,6 +33,31 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     }
   }, []);
 
+  useEffect(() => {
+    const handleOnline = () => {
+      if (error?.includes('conexão com a internet')) {
+        setError(null);
+      }
+    };
+
+    const handleOffline = () => {
+      setError('Não foi possível conectar ao servidor. Por favor, verifique sua conexão com a internet.');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Se já estiver offline ao montar o componente
+    if (!navigator.onLine) {
+      handleOffline();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [error]);
+
   const startBlockTimer = (blockTime: number) => {
     const interval = setInterval(() => {
       const now = new Date().getTime();
@@ -59,24 +84,27 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     e.preventDefault();
     setError(null);
 
+    const trimmedUsername = username.trim();
+    const trimmedPassword = password.trim();
+
     if (isBlocked) {
       setError(`Aguarde ${blockTimeLeft} segundos para tentar novamente`);
       return;
     }
 
-    if (!username.trim() || !password.trim()) {
+    if (!trimmedUsername || !trimmedPassword) {
       setError('Por favor, preencha todos os campos');
       return;
     }
 
-    if (password.length < 6) {
+    if (trimmedPassword.length < 6) {
       setError('A senha deve ter pelo menos 6 caracteres');
       return;
     }
 
     try {
       setLoading(true);
-      const user = await authService.signIn(username, password);
+      const user = await authService.signIn(trimmedUsername, trimmedPassword);
       if (user) {
         resetLoginAttempts();
         onLoginSuccess();
@@ -84,7 +112,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         handleFailedLogin();
       }
     } catch (err) {
-      handleFailedLogin();
+      if (err instanceof Error) {
+        if (err.message.includes('Failed to fetch') || 
+            err.message.includes('Network Error') || 
+            !navigator.onLine) {
+          setError('Não foi possível conectar ao servidor. Por favor, verifique sua conexão com a internet.');
+        } else {
+          handleFailedLogin();
+        }
+      } else {
+        handleFailedLogin();
+      }
     } finally {
       setLoading(false);
     }
