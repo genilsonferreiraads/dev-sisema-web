@@ -49,22 +49,24 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout, onUserUpdate }) 
               {userData.role === 'admin' && (
                 <button
                   onClick={() => setShowSettings(true)}
-                  className="px-2 md:px-3 py-1 md:py-1.5 text-sm bg-[#e1aa1e] text-gray-900 rounded hover:bg-[#e1aa1e]/80 transition-colors"
-                  title="Configurações de Usuário"
+                  className="p-1.5 text-[#e1aa1e] hover:text-[#e1aa1e]/80 transition-all duration-200 hover:bg-[#e1aa1e]/10 rounded-lg"
+                  title="Configurações"
                 >
-                  <div className="flex items-center gap-1 md:gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                    </svg>
-                    <span className="hidden md:inline">Configurações</span>
-                  </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                  </svg>
                 </button>
               )}
               <button
                 onClick={handleLogout}
-                className="px-2 md:px-3 py-1 md:py-1.5 text-sm bg-[#404040] text-gray-300 rounded hover:bg-[#505050] transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 bg-[#1e1e1e]/80 text-gray-300 rounded-lg text-sm font-medium
+                  hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 border border-[#404040]/50"
+                title="Sair do sistema"
               >
-                Sair
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1zm7.707 3.293a1 1 0 010 1.414L9.414 9H17a1 1 0 110 2H9.414l1.293 1.293a1 1 0 01-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                <span>Sair</span>
               </button>
             </div>
           )}

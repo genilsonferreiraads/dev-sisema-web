@@ -63,6 +63,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   const [duration, setDuration] = useState(0);
   const [showOfflineMessage, setShowOfflineMessage] = useState(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Adiciona useEffect para limpar a mensagem de erro
+  useEffect(() => {
+    if (uploadError) {
+      const timer = setTimeout(() => {
+        setUploadError(null);
+      }, 5000); // 5 segundos
+
+      return () => clearTimeout(timer);
+    }
+  }, [uploadError]);
 
   useEffect(() => {
     loadAudios();
@@ -380,14 +392,36 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     const sanitizedName = sanitizeFileName(file.name);
     
     setIsUploading(true);
+    setUploadError(null);
     
     try {
+      // Verifica se o arquivo já existe
+      const { data: existingFiles } = await supabase.storage
+        .from('audios')
+        .list();
+
+      const fileExists = existingFiles?.some(existingFile => 
+        existingFile.name === sanitizedName
+      );
+
+      if (fileExists) {
+        setUploadError(`O áudio "${file.name}" já existe. Por favor, escolha outro nome ou renomeie o arquivo antes de enviar.`);
+        return;
+      }
+
       // Upload do arquivo para o bucket 'audios'
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('audios')
         .upload(sanitizedName, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        if (uploadError.message.includes('duplicate')) {
+          setUploadError(`O áudio "${file.name}" já existe. Por favor, escolha outro nome ou renomeie o arquivo antes de enviar.`);
+        } else {
+          throw uploadError;
+        }
+        return;
+      }
 
       // Obtém a URL pública do arquivo
       const { data: { publicUrl } } = supabase.storage
@@ -409,6 +443,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       loadAudios();
     } catch (error) {
       console.error('Erro ao fazer upload do áudio:', error);
+      setUploadError('Ocorreu um erro ao enviar o áudio. Por favor, tente novamente.');
     } finally {
       setIsUploading(false);
       if (event.target) {
@@ -594,18 +629,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
   const handleUpdateTitle = async (audioId: string, newTitle: string) => {
     try {
-      await audioService.updateAudio(audioId, { title: newTitle });
+      const updatedAudio = await audioService.renameAudioFile(audioId, newTitle);
       // Atualiza o estado local dos áudios
       setAudios(prev => prev.map(audio => 
-        audio.id === audioId ? { ...audio, title: newTitle } : audio
+        audio.id === audioId ? updatedAudio : audio
       ));
       // Se o áudio sendo editado é o atual, atualiza também o currentAudio
       if (currentAudio?.id === audioId) {
-        setCurrentAudio(prev => prev ? { ...prev, title: newTitle } : null);
+        setCurrentAudio(updatedAudio);
       }
       setEditingAudioId(null);
     } catch (error) {
-      console.error('Erro ao atualizar título:', error);
+      console.error('Erro ao renomear arquivo de áudio:', error);
     }
   };
 
@@ -1118,18 +1153,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   }, []);
 
   return (
-    <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-4">
+    <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3 sm:p-4 mt-10 sm:mt-0">
       {/* Player Principal com Visualizador */}
-      <div className="mb-4 bg-[#2d2d2d] rounded-lg border border-[#404040] overflow-hidden">
+      <div className="mb-8 sm:mb-4 bg-[#2d2d2d] rounded-lg border border-[#404040] overflow-hidden">
         {/* Título do Áudio */}
-        <div className="p-3 border-b border-[#404040]">
-          <h3 className="text-[#e1aa1e] font-medium text-center">
+        <div className="p-2.5 sm:p-3 border-b border-[#404040]">
+          <h3 className="text-[#e1aa1e] font-medium text-center text-sm sm:text-base">
             {currentAudio?.title || 'Selecione um áudio'}
           </h3>
         </div>
 
         {/* Área do Visualizador */}
-        <div className="relative h-32 bg-[#1e1e1e] p-4 overflow-hidden">
+        <div className="relative h-20 sm:h-32 bg-[#1e1e1e] p-3 sm:p-4 overflow-hidden">
           <canvas
             ref={canvasRef}
             className="absolute inset-0 w-full h-full"
@@ -1144,13 +1179,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
               {externalIsPlaying && (
                 <>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    {/* Ondas se expandindo */}
-                    <div className="animate-wave-1 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
-                    <div className="animate-wave-2 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
-                    <div className="animate-wave-3 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
-                    <div className="animate-wave-4 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
-                    <div className="animate-wave-5 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
-                    <div className="animate-wave-6 absolute w-12 h-12 rounded-full border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    {/* Ondas se expandindo - ajustadas para mobile */}
+                    <div className="animate-wave-1 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-2 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-3 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-4 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-5 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
+                    <div className="animate-wave-6 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
                   </div>
                 </>
               )}
@@ -1161,12 +1196,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
                     togglePlay(currentAudio);
                   }
                 }}
-                className={`relative z-10 p-4 rounded-full bg-[#e1aa1e] hover:bg-[#e1aa1e]/90 transition-all transform 
+                className={`relative z-10 p-2.5 sm:p-4 rounded-full bg-[#e1aa1e] hover:bg-[#e1aa1e]/90 transition-all transform 
                   hover:scale-105 active:scale-95 shadow-lg ${externalIsPlaying ? 'ring-4 ring-[#e1aa1e]/50 animate-glow' : ''}`}
                 disabled={!currentAudio}
               >
                 <svg
-                  className="w-8 h-8 text-gray-900"
+                  className="w-6 h-6 sm:w-8 sm:h-8 text-gray-900"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -1193,7 +1228,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         </div>
 
         {/* Controles e Progresso */}
-        <div className="p-4 bg-[#1e1e1e]/50">
+        <div className="p-3 sm:p-4 bg-[#1e1e1e]/50">
           <audio
             ref={audioRef}
             src={currentAudio?.url}
@@ -1206,7 +1241,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
           {/* Barra de Progresso */}
           <div
-            className="h-1 bg-[#404040] rounded-full cursor-pointer mb-2"
+            className="h-1.5 bg-[#404040] rounded-full cursor-pointer mb-2"
             onClick={handleProgressClick}
           >
             <div
@@ -1216,7 +1251,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           </div>
 
           {/* Tempo */}
-          <div className="flex justify-between text-xs text-gray-400 mb-3">
+          <div className="flex justify-between text-[10px] sm:text-xs text-gray-400 mb-2 sm:mb-3">
             <span>{formatTime(audioRef.current?.currentTime || 0)}</span>
             <span>{formatTime(audioRef.current?.duration || 0)}</span>
           </div>
@@ -1228,12 +1263,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
             return (
               <div className="flex justify-end">
-                <div className="text-right bg-[#2d2d2d] px-3 py-1 rounded border border-[#404040]/50">
-                  <div className="text-xs text-gray-400">
-                    Próximo a Reproduzir: {nextInfo.nextAudio.title}
+                <div className="text-right bg-[#2d2d2d] px-2 sm:px-3 py-1 rounded border border-[#404040]/50">
+                  <div className="text-[10px] sm:text-xs text-gray-400 truncate max-w-[200px] sm:max-w-none">
+                    Próximo: {nextInfo.nextAudio.title}
                   </div>
                   {nextInfo.timer && (
-                    <div className="text-xs text-[#e1aa1e]">
+                    <div className="text-[10px] sm:text-xs text-[#e1aa1e]">
                       Em {formatTimeLeft(nextInfo.timer.timeLeft)}
                     </div>
                   )}
@@ -1245,20 +1280,21 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       </div>
 
       {/* Cabeçalho da Lista */}
-      <div className="mb-3 bg-[#2d2d2d] rounded-lg p-2 border border-[#404040] flex justify-between items-center">
+      <div className="mb-4 bg-[#2d2d2d] rounded-lg p-2 sm:p-2 border border-[#404040] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400 px-2">Lista de Áudios</span>
         </div>
 
         {/* Botões de ação */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           {/* Botão Falar Texto */}
           <button
             onClick={() => setIsTextToSpeechOpen(true)}
             className={`
-              bg-[#2d2d2d] hover:bg-[#404040] text-[#e1aa1e] px-4 py-2 rounded  
+              bg-[#2d2d2d] hover:bg-[#404040] text-[#e1aa1e] px-3 sm:px-4 py-1.5 sm:py-2 rounded  
               flex items-center gap-2 transition-all duration-300 
               border border-[#404040] hover:border-[#e1aa1e]
+              text-xs sm:text-sm flex-1 sm:flex-none justify-center
               ${isTextToSpeechSpeaking ? 'button-speaking' : ''}
             `}
           >
@@ -1325,6 +1361,31 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           </label>
         </div>
       </div>
+
+      {/* Adicionar mensagem de erro após os botões de ação */}
+      {uploadError && (
+        <div className="mt-4 p-4 bg-gradient-to-r from-red-500/10 via-red-500/5 to-red-500/10 border border-red-500/20 rounded-lg backdrop-blur-sm animate-fade-in">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-red-500/10 rounded-lg shrink-0">
+              <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-red-400 font-medium text-sm mb-1">Arquivo Duplicado</h3>
+              <p className="text-red-300/90 text-sm">{uploadError}</p>
+            </div>
+            <button 
+              onClick={() => setUploadError(null)}
+              className="p-1 hover:bg-red-500/10 rounded-lg transition-colors text-red-400 hover:text-red-300"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Lista de Áudios */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">

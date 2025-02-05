@@ -176,16 +176,12 @@ const App: React.FC = () => {
   };
 
   const handleClipboardVideo = async (url: string) => {
-    console.log('handleClipboardVideo chamado com URL:', url);
-    
-    if (!url.trim() || isClipboardLoading) {
-      console.log('URL vazia ou já está carregando');
-      return;
-    }
-
-    setIsClipboardLoading(true);
     try {
-      console.log('Convertendo URL:', url);
+      if (!url || isClipboardLoading) {
+        return;
+      }
+
+      setIsClipboardLoading(true);
       
       let videoId = '';
       if (url.includes('youtube.com/watch?v=')) {
@@ -195,25 +191,23 @@ const App: React.FC = () => {
       }
 
       if (!videoId) {
-        throw new Error('URL do YouTube inválida');
+        setError('URL do YouTube inválida');
+        return;
       }
 
       const embedUrl = `https://www.youtube.com/embed/${videoId}`;
+      const result = await videoService.addVideo(embedUrl, '');
       
-      console.log('Adicionando vídeo com URL:', embedUrl);
-      const result = await videoService.addVideo(embedUrl, 'Vídeo do YouTube');
-      console.log('Resultado da adição:', result);
-      
-      if (!result) {
-        throw new Error('Falha ao adicionar vídeo');
+      if (result) {
+        setError('');
+        setTimeout(() => setError(''), 3000);
       }
-      
-      console.log('Vídeo adicionado com sucesso');
-      return result;
     } catch (error) {
-      console.error('Erro ao adicionar vídeo:', error);
-      setError('Erro ao adicionar vídeo. Verifique se a URL é válida.');
-      throw error;
+      if (!navigator.onLine) {
+        setError('Sem conexão com a internet');
+      } else {
+        setError('Erro ao adicionar vídeo');
+      }
     } finally {
       setIsClipboardLoading(false);
     }
@@ -231,7 +225,7 @@ const App: React.FC = () => {
         window.location.reload();
       }
     } catch (error) {
-      console.log('Ainda sem conexão...');
+      // Removido log desnecessário - feedback visual já existe
     } finally {
       setIsCheckingConnection(false);
     }

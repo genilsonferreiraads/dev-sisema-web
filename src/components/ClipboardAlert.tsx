@@ -31,7 +31,7 @@ const saveToStorage = (url: string) => {
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(validVideos));
   } catch (error) {
-    console.error('Erro ao salvar no localStorage:', error);
+    // Erros de localStorage são esperados em alguns casos
   }
 };
 
@@ -54,7 +54,7 @@ const isVideoProcessed = (url: string): boolean => {
     
     return validVideos.some(video => video.url === url);
   } catch (error) {
-    console.error('Erro ao ler do localStorage:', error);
+    // Erros de localStorage são esperados em alguns casos
     return false;
   }
 };
