@@ -31,7 +31,7 @@ interface YouTubeSearchResult {
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlaying, pendingVideoId }): JSX.Element => {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [newVideoUrl, setNewVideoUrl] = useState('');
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
@@ -1136,7 +1136,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
                 clearInterval(autoplayRef.current);
               }
               setIsChangingVideo(false);
-              console.log('Máximo de tentativas de reprodução atingido');
               return prev;
             }
 
@@ -1162,6 +1161,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       };
     }
   }, [isChangingVideo, player, isPlayerReady, attemptAutoplay]);
+
+  // Adiciona useEffect para limpar mensagens de erro
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 5000); // 5 segundos
+
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  const handleAutoplayAttempts = () => {
+    if (autoplayAttempts >= maxAutoplayAttempts) {
+      setAutoplayAttempts(0);
+      return;
+    }
+    // ... rest of the code ...
+  };
 
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3">
@@ -1254,7 +1272,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
               </div>
             )}
           </div>
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {error && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-red-500/10 via-red-500/5 to-red-500/10 border border-red-500/20 rounded-lg backdrop-blur-sm animate-fade-in">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-red-500/10 rounded-lg shrink-0">
+                  <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-red-400 font-medium text-sm mb-1">Erro</h3>
+                  <p className="text-red-300/90 text-sm">{error}</p>
+                </div>
+                <button 
+                  onClick={() => setError(null)}
+                  type="button"
+                  className="p-1 hover:bg-red-500/10 rounded-lg transition-colors text-red-400 hover:text-red-300"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </form>
 
@@ -1409,55 +1450,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         </>
       )}
 
-      <div className="flex gap-2 mb-3">
+      <div className="flex gap-3 mb-3">
         <button
           type="button"
           onClick={handleSearchButton}
-          className={`add-video-button flex-1 ${
-            isLoading 
-              ? 'opacity-75 cursor-not-allowed' 
-              : 'bg-[#e1aa1e] hover:bg-[#e1aa1e]/80'
-          } bg-[#e1aa1e] text-gray-900 px-3 py-1.5 rounded transition-all duration-300 flex items-center justify-center gap-2`}
-          disabled={isLoading}
+          disabled={isLoading || !isOnline}
+          className={`
+            flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium
+            transition-all duration-200 whitespace-nowrap shadow-lg
+            ${isLoading 
+              ? 'bg-gradient-to-r from-[#e1aa1e] to-[#d19200] opacity-50 cursor-not-allowed' 
+              : !isOnline
+                ? 'bg-gray-600 text-gray-300 opacity-50 cursor-not-allowed'
+                : 'bg-gradient-to-r from-[#e1aa1e] to-[#d19200] text-gray-900 hover:from-[#e1aa1e]/90 hover:to-[#d19200]/90 shadow-[#e1aa1e]/20 active:scale-[0.98]'}
+          `}
         >
           {isLoading ? (
             <>
-              <svg 
-                className="animate-spin h-4 w-4" 
-                xmlns="http://www.w3.org/2000/svg" 
-                fill="none" 
-                viewBox="0 0 24 24"
-              >
-                <circle 
-                  className="opacity-25" 
-                  cx="12" 
-                  cy="12" 
-                  r="10" 
-                  stroke="currentColor" 
-                  strokeWidth="4"
-                />
-                <path 
-                  className="opacity-75" 
-                  fill="currentColor" 
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
+              <svg className="animate-spin h-4 w-4 sm:h-5 sm:w-5 text-gray-900" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              <span className="animate-pulse">Adicionando...</span>
+              <span className="animate-pulse font-semibold text-gray-900">Adicionando...</span>
             </>
           ) : (
             <>
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d={getButtonIcon()}
-                />
+              <svg className="w-4 h-4 sm:w-5 sm:h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={getButtonIcon()} />
               </svg>
               <span>{getButtonText()}</span>
             </>
@@ -1467,10 +1486,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         <button
           type="button"
           onClick={() => setIsSidebarOpen(true)}
-          className="flex-1 bg-[#2d2d2d] hover:bg-[#404040] border border-[#404040] text-[#e1aa1e] px-3 py-1.5 rounded flex items-center justify-center gap-2 transition-colors"
+          className="flex-1 bg-[#2d2d2d] hover:bg-[#363636] border border-[#404040]/50 text-[#e1aa1e] px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all duration-300 group hover:border-[#e1aa1e]/50 hover:shadow-lg hover:shadow-[#e1aa1e]/10 active:scale-[0.98] font-medium text-xs sm:text-sm"
         >
           <svg
-            className="w-4 h-4"
+            className="w-4 h-4 sm:w-5 sm:h-5 transition-transform duration-300 group-hover:scale-110"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

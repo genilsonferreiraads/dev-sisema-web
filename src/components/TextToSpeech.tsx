@@ -899,8 +899,28 @@ TEXTO A SER MELHORADO:`;
                         ${isOptimizingText || isTypingAnimation ? 'opacity-50 cursor-not-allowed' : ''}
                         group/optimize
                       `}
-                      title="Otimizar com IA"
                     >
+                      {/* Tooltip */}
+                      <div className="absolute bottom-full right-0 mb-2 w-64 opacity-0 scale-95 group-hover/optimize:opacity-100 group-hover/optimize:scale-100 transform transition-all duration-200 pointer-events-none z-50">
+                        <div className="bg-[#2d2d2d] border border-[#e1aa1e]/20 p-3 rounded-lg shadow-xl relative backdrop-blur-sm">
+                          <div className="flex items-start gap-2">
+                            <svg className="w-5 h-5 text-[#e1aa1e] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            <div>
+                              <h4 className="text-[#e1aa1e] font-medium text-sm mb-1">Otimização com IA</h4>
+                              <p className="text-gray-400 text-xs leading-relaxed">
+                                Aprimora seu texto automaticamente para um formato mais profissional e adequado para anúncios de academia.
+                              </p>
+                            </div>
+                          </div>
+                          {/* Seta do tooltip */}
+                          <div className="absolute bottom-0 right-4 transform translate-y-full">
+                            <div className="w-3 h-3 bg-[#2d2d2d] border-r border-b border-[#e1aa1e]/20 transform rotate-45 -translate-y-1.5"></div>
+                          </div>
+                        </div>
+                      </div>
+
                       {isOptimizingText ? (
                         <svg className="animate-spin h-5 w-5 text-[#e1aa1e]" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />

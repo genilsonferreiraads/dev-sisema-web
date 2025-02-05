@@ -44,8 +44,6 @@ export const audioService = {
   },
 
   addAudio: async (audio: Omit<AudioData, 'id' | 'created_at'>): Promise<AudioData> => {
-    console.log('Tentando adicionar áudio com dados:', audio);
-    
     const { data, error } = await supabase
       .from('audios')
       .insert([{
@@ -61,7 +59,6 @@ export const audioService = {
       .single();
     
     if (error) {
-      console.error('Erro ao adicionar áudio:', error);
       throw error;
     }
 
@@ -165,6 +162,67 @@ export const audioService = {
 
     if (error) throw error;
     return data;
+  },
+
+  async renameAudioFile(audioId: string, newTitle: string): Promise<AudioData> {
+    try {
+      // 1. Get the current audio data
+      const { data: audio, error: fetchError } = await supabase
+        .from('audios')
+        .select('*')
+        .eq('id', audioId)
+        .single();
+
+      if (fetchError) throw fetchError;
+      if (!audio) throw new Error('Audio not found');
+
+      // 2. Extract the old file name from the URL (removing query parameters)
+      const oldFileName = audio.url.split('/').pop()?.split('?')[0];
+      if (!oldFileName) throw new Error('Invalid file URL');
+
+      // 3. Generate new file name (keeping the extension)
+      const fileExtension = oldFileName.split('.').pop();
+      const sanitizedTitle = newTitle
+        .replace(/[\u0300-\u036f]/g, '') // Remove accents
+        .replace(/[^a-zA-Z0-9.]/g, '_')  // Replace special chars with _
+        .replace(/_+/g, '_')             // Remove multiple underscores
+        .toLowerCase();                   // Convert to lowercase
+      const newFileName = `${sanitizedTitle}.${fileExtension}`;
+
+      // 4. Move the file in storage (which effectively renames it)
+      const { error: moveError } = await supabase.storage
+        .from('audios')
+        .move(oldFileName, newFileName);
+
+      if (moveError) {
+        console.error('Error moving file:', moveError);
+        throw new Error('Failed to rename file in storage');
+      }
+
+      // 5. Get the new public URL
+      const { data: { publicUrl: newUrl } } = supabase.storage
+        .from('audios')
+        .getPublicUrl(newFileName);
+
+      // 6. Update the database with new title and URL
+      const { data: updatedAudio, error: updateError } = await supabase
+        .from('audios')
+        .update({ 
+          title: newTitle,
+          url: newUrl 
+        })
+        .eq('id', audioId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      if (!updatedAudio) throw new Error('Failed to update audio');
+
+      return updatedAudio;
+    } catch (error) {
+      console.error('Error renaming audio file:', error);
+      throw error;
+    }
   }
 };
 

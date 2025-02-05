@@ -97,11 +97,6 @@ export const authService = {
   async changePassword(username: string, adminPassword: string, newPassword: string): Promise<boolean> {
     try {
       if (!username || !adminPassword || !newPassword) {
-        console.error('Dados inválidos:', { 
-          hasUsername: !!username, 
-          hasAdminPassword: !!adminPassword, 
-          hasNewPassword: !!newPassword 
-        });
         throw new Error('Todos os campos são obrigatórios');
       }
 
@@ -111,17 +106,6 @@ export const authService = {
         throw new Error('Usuário não autenticado');
       }
 
-      const user = JSON.parse(currentUser);
-      console.log('Usuário atual:', { username: user.username, role: user.role });
-
-      console.log('Tentando alterar senha para usuário:', username);
-      
-      console.log('Chamando change_password com:', {
-        username,
-        adminPassword,
-        newPassword
-      });
-
       const { data, error } = await supabase
         .rpc('change_password', {
           p_username: username,
@@ -129,16 +113,12 @@ export const authService = {
           p_new_password: newPassword
         });
 
-      console.log('Resposta do change_password:', { data, error });
-
       if (error) {
-        console.error('Erro ao alterar senha:', error);
         throw error;
       }
 
       return data || false;
     } catch (error) {
-      console.error('Erro ao alterar senha:', error);
       throw error;
     }
   },
@@ -169,31 +149,30 @@ export const authService = {
 
   async listUsers(): Promise<UserListItem[]> {
     try {
-      console.log('Chamando list_users no Supabase...');
       const { data, error } = await supabase
         .rpc('list_users');
 
-      console.log('Resposta do list_users:', { data, error });
-
-      if (error) {
-        console.error('Erro ao listar usuários:', error);
-        throw error;
-      }
+      if (error) throw error;
 
       return data || [];
     } catch (error) {
-      console.error('Erro ao listar usuários:', error);
       throw error;
     }
   },
 
-  async updateUserCredentials(username: string, newUsername: string | null, newPassword: string | null): Promise<boolean> {
+  async updateUserCredentials(
+    username: string, 
+    newUsername: string | null, 
+    newPassword: string | null,
+    newRole: string | null
+  ): Promise<boolean> {
     try {
       const { data, error } = await supabase
         .rpc('update_user_credentials', {
           p_username: username,
           p_new_username: newUsername,
-          p_new_password: newPassword
+          p_new_password: newPassword,
+          p_new_role: newRole
         });
 
       if (error) {
@@ -204,6 +183,58 @@ export const authService = {
       return data || false;
     } catch (error) {
       console.error('Erro ao atualizar credenciais do usuário:', error);
+      throw error;
+    }
+  },
+
+  async createUser(
+    newUsername: string, 
+    password: string, 
+    fullName: string, 
+    adminPassword: string,
+    role: string = 'client'
+  ): Promise<boolean> {
+    try {
+      const params = {
+        p_username: newUsername,
+        p_password: password,
+        p_full_name: fullName,
+        p_role: role
+      };
+
+      const { data, error } = await supabase
+        .rpc('create_user', params);
+
+      if (error) {
+        throw error;
+      }
+
+      return data || false;
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error('Erro ao criar usuário:', error.message);
+      } else {
+        console.error('Erro não identificado ao criar usuário');
+      }
+      throw error;
+    }
+  },
+
+  async deleteUser(username: string, adminPassword: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase
+        .rpc('delete_user', {
+          p_username: username,
+          p_admin_password: adminPassword
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      return data || false;
+    } catch (error) {
+      console.error('Erro ao excluir usuário:', error);
       throw error;
     }
   }
