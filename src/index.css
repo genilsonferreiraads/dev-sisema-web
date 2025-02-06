@@ -29,4 +29,14 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #e1aa1e;
+}
+
+/* Customização do botão de upload de arquivo */
+input[type="file"]::file-selector-button {
+  content: "Escolher foto" !important;
+}
+
+/* Para navegadores baseados em Webkit (Chrome, Safari, etc) */
+input[type="file"]::-webkit-file-upload-button {
+  content: "Escolher foto" !important;
 } 

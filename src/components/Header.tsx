@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User } from '../types/auth';
 import { authService } from '../lib/auth';
 import UserSettings from './UserSettings';
+import { UserAvatar } from './UserAvatar';
 import logo from '../assets/Logo Site Império.png';
 
 interface HeaderProps {
@@ -43,9 +44,12 @@ export const Header: React.FC<HeaderProps> = ({ user, onLogout, onUserUpdate }) 
           {/* Botões e saudação */}
           {userData && (
             <div className="flex items-center gap-2 md:gap-4 w-full md:w-auto justify-end md:ml-auto">
-              <span className="text-gray-300 text-sm md:text-base truncate">
-                Olá, {userData.display_name || userData.full_name}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-gray-300 text-sm md:text-base truncate">
+                  Olá, {userData.display_name || userData.full_name}
+                </span>
+                <UserAvatar user={userData} size={40} onAvatarUpdate={onUserUpdate} />
+              </div>
               {userData.role === 'admin' && (
                 <button
                   onClick={() => setShowSettings(true)}

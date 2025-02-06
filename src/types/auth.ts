@@ -2,16 +2,17 @@ export interface User {
   id: string;
   username: string;
   full_name: string;
-  role: 'admin' | 'client';
-  display_name: string;
+  role: string;
+  display_name?: string;
+  email?: string;
 }
 
 export interface UserListItem {
   id: string;
   username: string;
   full_name: string;
-  display_name: string;
   role: string;
+  display_name?: string;
 }
 
 export interface AuthState {
