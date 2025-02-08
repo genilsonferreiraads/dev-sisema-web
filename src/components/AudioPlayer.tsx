@@ -55,6 +55,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   const endTimeRefs = useRef<Record<string, string>>({});
   const [isTextToSpeechOpen, setIsTextToSpeechOpen] = useState(false);
   const [isTextToSpeechSpeaking, setIsTextToSpeechSpeaking] = useState(false);
+  const [ttsDelayTimeout, setTtsDelayTimeout] = useState<NodeJS.Timeout | null>(null);
   const [pinnedAudios, setPinnedAudios] = useState<string[]>([]);
   const [showPinConfirm, setShowPinConfirm] = useState<string | null>(null);
   const [pinConfirmPosition, setPinConfirmPosition] = useState<{ x: number; y: number } | null>(null);
@@ -64,13 +65,26 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   const [showOfflineMessage, setShowOfflineMessage] = useState(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [ttsLastFinishTime, setTtsLastFinishTime] = useState<number | null>(null);
+  const isTTSSpeakingRef = useRef(isTextToSpeechSpeaking);
+  const ttsLastFinishTimeRef = useRef(ttsLastFinishTime);
+  const blockUntilRef = useRef<number>(0);
+  const createNewCycleRefs = useRef<Record<string, (() => void) | undefined>>({});
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
-  // Adiciona useEffect para limpar a mensagem de erro
+  useEffect(() => {
+    isTTSSpeakingRef.current = isTextToSpeechSpeaking;
+  }, [isTextToSpeechSpeaking]);
+
+  useEffect(() => {
+    ttsLastFinishTimeRef.current = ttsLastFinishTime;
+  }, [ttsLastFinishTime]);
+
   useEffect(() => {
     if (uploadError) {
       const timer = setTimeout(() => {
         setUploadError(null);
-      }, 5000); // 5 segundos
+      }, 5000);
 
       return () => clearTimeout(timer);
     }
@@ -85,10 +99,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     };
   }, []);
 
+  useEffect(() => {
+    const timerId = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timerId);
+  }, []);
+
+  useEffect(() => {
+    const handleAudioInserted = () => {
+      loadAudios();
+    };
+    window.addEventListener('audioInserted', handleAudioInserted);
+    return () => window.removeEventListener('audioInserted', handleAudioInserted);
+  }, []);
+
   const loadAudios = async () => {
     try {
       const data = await audioService.getAudios();
-      // Ordena os áudios fixados por pinned_at
       const sortedData = [...data].sort((a, b) => {
         if (a.is_pinned && !b.is_pinned) return -1;
         if (!a.is_pinned && b.is_pinned) return 1;
@@ -99,10 +125,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       });
       setAudios(sortedData);
       
-      // Atualiza o estado dos áudios fixados
       setPinnedAudios(sortedData.filter(audio => audio.is_pinned).map(audio => audio.id));
       
-      // Carrega as preferências para cada áudio
       data.forEach(audio => {
         loadAudioPreferences(audio.id);
       });
@@ -120,28 +144,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         const now = Date.now();
         const timeLeft = Math.max(0, Math.floor((endTime - now) / 1000));
 
-        // Se ainda há tempo restante ou se acabou de terminar
         if (timeLeft >= 0) {
           const interval = prefs.repeat_interval * 60;
           
-          // Se o timer acabou de terminar, cria um novo ciclo
           if (timeLeft === 0) {
             const newEndTime = new Date(Date.now() + interval * 1000).toISOString();
             
-            // Atualiza o endTime no banco
             await audioService.updatePreferences(audioId, {
               ...prefs,
               timer_end_at: newEndTime
             });
 
-            // Inicia novo ciclo com o novo endTime
             startNewTimerCycle(audioId, interval, newEndTime);
           } else {
-            // Continua o ciclo atual com o tempo restante
             startNewTimerCycle(audioId, interval, prefs.timer_end_at);
           }
         } else {
-          // Se o timer expirou há muito tempo, desativa-o
           await audioService.updatePreferences(audioId, {
             auto_repeat: false,
             timer_end_at: undefined,
@@ -150,7 +168,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         }
       }
 
-      // Atualiza as preferências locais
       setPreferences(prev => ({
         ...prev,
         [audioId]: {
@@ -162,7 +179,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       }));
 
     } catch (error) {
-      // Mantém o erro silencioso
     }
   };
 
@@ -196,6 +212,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
     const createNewCycle = async () => {
       try {
+        if (isTTSSpeakingRef.current) {
+          return;
+        }
+        if (Date.now() < blockUntilRef.current) {
+          return;
+        }
+        
         if (isPlayingRef.current) {
           if (attemptCount < MAX_ATTEMPTS) {
             attemptCount++;
@@ -215,7 +238,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           return;
         }
 
-        // Primeiro atualiza as preferências
         const newEndTime = new Date(Date.now() + interval * 1000).toISOString();
         await audioService.updatePreferences(audioId, {
           auto_repeat: true,
@@ -225,12 +247,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
         endTimeRefs.current[audioId] = newEndTime;
 
-        // Depois prepara o áudio
         if (audioRef.current) {
           audioRef.current.src = audioData.url;
           audioRef.current.currentTime = 0;
-
-          // Aguarda o áudio estar pronto
+          setProgress(0);
+          audioRef.current.load();
           await new Promise((resolve) => {
             audioRef.current!.addEventListener('canplay', resolve, { once: true });
           });
@@ -247,11 +268,19 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           }
         }
 
-        // Libera para próxima reprodução quando este áudio terminar
         audioRef.current?.addEventListener('ended', () => {
           isPlayingRef.current = false;
           setExternalIsPlaying(false);
         }, { once: true });
+
+        setAudioTimers(prev => ({
+          ...prev,
+          [audioId]: {
+            ...prev[audioId],
+            timeLeft: interval,
+            endTime: newEndTime
+          }
+        }));
 
       } catch (error) {
         isPlayingRef.current = false;
@@ -259,12 +288,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       }
     };
 
+    createNewCycleRefs.current[audioId] = createNewCycle;
+
     const intervalId = setInterval(() => {
       const currentTime = Date.now();
       const timerEndTime = new Date(endTimeRefs.current[audioId]).getTime();
       const newTimeLeft = Math.max(0, Math.floor((timerEndTime - currentTime) / 1000));
 
-      if (newTimeLeft === 0 && !isPlayingRef.current) {
+      if (newTimeLeft === 0 && !isPlayingRef.current && !isTTSSpeakingRef.current && Date.now() >= blockUntilRef.current) {
         createNewCycle();
       }
 
@@ -292,7 +323,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     }));
 
     if (initialTimeLeft === 0) {
-      createNewCycle();
+      if (!isTTSSpeakingRef.current && (!ttsLastFinishTimeRef.current || (Date.now() - ttsLastFinishTimeRef.current >= 5000))) {
+        createNewCycle();
+      }
     }
 
     return intervalId;
@@ -317,12 +350,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         try {
           const playPromise = audioRef.current.play();
           if (playPromise !== undefined) {
-            await playPromise;
+            await playPromise.catch((error) => {
+              if (error instanceof Error && error.message.includes('interrupted by a call to pause')) {
+                // Ignorar erro de interrupção
+              } else {
+                throw error;
+              }
+            });
             setExternalIsPlaying(true);
           }
         } catch (error) {
-          console.error('Erro ao reproduzir áudio:', error);
-          setExternalIsPlaying(false);
+          if (error instanceof Error && error.message.includes('interrupted by a call to pause')) {
+            // Ignorar erro de interrupção
+          } else {
+            console.error('Erro ao reproduzir áudio:', error);
+            setExternalIsPlaying(false);
+          }
         }
       }
     } catch (error) {
@@ -333,12 +376,15 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
   const playAudio = () => {
     if (!audioRef.current) return;
-    
     audioRef.current.play()
       .then(() => setExternalIsPlaying(true))
-      .catch(error => {
-        console.error('Erro ao reproduzir áudio:', error);
-        setExternalIsPlaying(false);
+      .catch((error) => {
+        if (error instanceof Error && error.message.includes('interrupted by a call to pause')) {
+          // Ignorar erro de interrupção, pois o áudio foi pausado antes de iniciar
+        } else {
+          console.error('Erro ao reproduzir áudio:', error);
+          setExternalIsPlaying(false);
+        }
       });
   };
 
@@ -346,25 +392,19 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     if (!audioRef.current) return;
 
     if (currentAudio?.id !== audio.id) {
-      // Novo áudio selecionado
       if (currentAudio) {
         audioRef.current.pause();
       }
       setCurrentAudio(audio);
       
-      // Remove qualquer listener anterior
       audioRef.current.removeEventListener('loadeddata', playAudio);
       
-      // Define o novo src
       audioRef.current.src = audio.url;
       
-      // Adiciona o listener para reproduzir quando o áudio estiver pronto
       audioRef.current.addEventListener('loadeddata', playAudio, { once: true });
       
-      // Inicia o carregamento
       audioRef.current.load();
     } else {
-      // Mesmo áudio - toggle play/pause
       if (!externalIsPlaying) {
         playAudio();
       } else {
@@ -374,28 +414,25 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     }
   };
 
-  // Função para sanitizar o nome do arquivo
   const sanitizeFileName = (fileName: string): string => {
     return fileName
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-      .replace(/[^a-zA-Z0-9.]/g, '_')  // Substitui caracteres especiais por _
-      .replace(/_+/g, '_')             // Remove underscores múltiplos
-      .toLowerCase();                   // Converte para minúsculas
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9.]/g, '_')
+      .replace(/_+/g, '_')
+      .toLowerCase();
   };
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!event.target.files || event.target.files.length === 0) return;
     
     const file = event.target.files[0];
-    // Sanitiza o nome do arquivo para evitar problemas com caracteres especiais
     const sanitizedName = sanitizeFileName(file.name);
     
     setIsUploading(true);
     setUploadError(null);
     
     try {
-      // Verifica se o arquivo já existe
       const { data: existingFiles } = await supabase.storage
         .from('audios')
         .list();
@@ -409,7 +446,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         return;
       }
 
-      // Upload do arquivo para o bucket 'audios'
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('audios')
         .upload(sanitizedName, file);
@@ -423,17 +459,15 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         return;
       }
 
-      // Obtém a URL pública do arquivo
       const { data: { publicUrl } } = supabase.storage
         .from('audios')
         .getPublicUrl(sanitizedName);
 
-      // Salva a referência no banco de dados
       const { error: dbError } = await supabase
         .from('audios')
         .insert([
           {
-            title: file.name, // Mantém o nome original como título
+            title: file.name,
             url: publicUrl
           }
         ]);
@@ -456,13 +490,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     setTimerAudioId(audioId);
     const seconds = minutes * 60;
     
-    // Inicia o novo ciclo do timer
     startNewTimerCycle(audioId, seconds);
 
-    // Calcula o tempo de término
     const endTime = new Date(Date.now() + seconds * 1000).toISOString();
 
-    // Salva as preferências no banco
     try {
       const prefs = {
         auto_repeat: true,
@@ -472,7 +503,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       
       await audioService.updatePreferences(audioId, prefs);
       
-      // Atualiza também as preferências locais
       setPreferences(prev => ({
         ...prev,
         [audioId]: {
@@ -487,7 +517,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   };
 
   const stopRepeatTimer = async (audioId: string) => {
-    // Não para o timer se o áudio estiver tocando
     if (currentAudio?.id === audioId && externalIsPlaying) {
       return;
     }
@@ -512,7 +541,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       
       await audioService.updatePreferences(audioId, prefs);
       
-      // Atualiza também as preferências locais
       setPreferences(prev => ({
         ...prev,
         [audioId]: {
@@ -548,10 +576,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         return;
       }
 
-      // Remove o registro do banco de dados
       await audioService.deleteAudio(audioId);
 
-      // Atualiza estados locais
       if (currentAudio?.id === audioId) {
         setCurrentAudio(null);
         setExternalIsPlaying(false);
@@ -567,7 +593,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         return newPrefs;
       });
 
-      // Recarrega a lista de áudios
       await loadAudios();
 
     } catch (error) {
@@ -586,7 +611,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Adicione esta função auxiliar para formatar o tempo do timer
   const formatTimeLeft = (seconds: number): string => {
     if (seconds < 60) {
       return `${Math.ceil(seconds)} Segundos`;
@@ -596,9 +620,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     return `${minutes}min ${remainingSeconds}s`;
   };
 
-  // Modifique a função getNextAudioInfo para verificar os timers ativos
   const getNextAudioInfo = () => {
-    // Primeiro, verifica se há algum áudio pendente na fila
     if (pendingAudios.length > 0) {
       const nextAudioId = pendingAudios[0];
       const nextAudio = audios.find(a => a.id === nextAudioId);
@@ -607,7 +629,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       return { nextAudio, timer };
     }
 
-    // Se não há áudios pendentes, procura o próximo áudio agendado
     let nextScheduledAudio = null;
     let shortestTime = Infinity;
 
@@ -630,11 +651,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   const handleUpdateTitle = async (audioId: string, newTitle: string) => {
     try {
       const updatedAudio = await audioService.renameAudioFile(audioId, newTitle);
-      // Atualiza o estado local dos áudios
       setAudios(prev => prev.map(audio => 
         audio.id === audioId ? updatedAudio : audio
       ));
-      // Se o áudio sendo editado é o atual, atualiza também o currentAudio
       if (currentAudio?.id === audioId) {
         setCurrentAudio(updatedAudio);
       }
@@ -851,7 +870,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     }, 10);
   };
 
-  // Adicione este useEffect para gerenciar a seleção de texto
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
@@ -931,7 +949,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
   useEffect(() => {
     if (audioRef.current && canvasRef.current) {
       if (externalIsPlaying) {
-        audioRef.current.play();
+        audioRef.current.play().catch((error) => {
+          if (error instanceof Error && error.message.includes('interrupted by a call to pause')) {
+            // Ignorar este erro
+          } else {
+            console.error('Erro no efeito de play:', error);
+          }
+        });
         canvasRef.current.getContext('2d')?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       } else {
         audioRef.current.pause();
@@ -954,36 +978,29 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       animationRef.current = requestAnimationFrame(draw);
       analyserRef.current!.getByteFrequencyData(dataArray);
 
-      // Fundo com gradiente
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Número de ondas e configurações
       const waves = 3;
       const points = 100;
       const spacing = canvas.height / (waves + 1);
 
-      // Para cada linha de onda
       for (let w = 1; w <= waves; w++) {
         const baseY = spacing * w;
         
         ctx.beginPath();
         ctx.moveTo(0, baseY);
 
-        // Desenha a onda através da largura do canvas
         for (let x = 0; x <= canvas.width; x++) {
           const progress = x / canvas.width;
           const index = Math.floor(progress * bufferLength);
           const value = dataArray[index] / 255.0;
           
-          // Amplitude varia com o áudio
           const amplitude = externalIsPlaying ? 30 * value : 10;
           
-          // Frequência e fase variam com o tempo e posição
           const frequency = 0.02;
           const phase = Date.now() * 0.002 + w;
           
-          // Calcula a posição Y com múltiplas ondas sobrepostas
           const y = baseY + 
                    Math.sin(x * frequency + phase) * amplitude +
                    Math.sin(x * frequency * 0.5 + phase * 1.5) * amplitude * 0.5;
@@ -991,7 +1008,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           ctx.lineTo(x, y);
         }
 
-        // Gradiente para a onda
         const gradient = ctx.createLinearGradient(0, baseY - 50, 0, baseY + 50);
         const alpha = externalIsPlaying ? (0.5 - (w - 1) * 0.1) : 0.2;
         
@@ -1003,7 +1019,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Efeito de brilho
         if (externalIsPlaying) {
           ctx.save();
           ctx.filter = 'blur(4px)';
@@ -1014,7 +1029,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         }
       }
 
-      // Adiciona partículas brilhantes
       if (externalIsPlaying) {
         for (let i = 0; i < bufferLength; i += 8) {
           const value = dataArray[i] / 255.0;
@@ -1043,7 +1057,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
       const isPinned = !audio.is_pinned;
       const pinned_at = isPinned ? new Date().toISOString() : undefined;
 
-      // Atualiza no banco de dados
       const { data, error } = await supabase
         .from('audios')
         .update({ 
@@ -1054,7 +1067,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
 
       if (error) throw error;
 
-      // Atualiza o estado local
       setPinnedAudios(prev => {
         if (isPinned) {
           return [audioId, ...prev];
@@ -1063,7 +1075,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         }
       });
 
-      // Atualiza a lista de áudios
       setAudios(prev => prev.map(a => 
         a.id === audioId 
           ? { ...a, is_pinned: isPinned, pinned_at: pinned_at }
@@ -1147,23 +1158,27 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
     }
   }, [onEnded]);
 
-  // Quando o componente montar, garantir que o estado inicial seja correto
   useEffect(() => {
     setExternalIsPlaying(false);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (ttsDelayTimeout) {
+        clearTimeout(ttsDelayTimeout);
+      }
+    };
+  }, [ttsDelayTimeout]);
+
   return (
     <div className="bg-[#1e1e1e] text-gray-300 rounded-lg shadow-lg p-3 sm:p-4 mt-10 sm:mt-0">
-      {/* Player Principal com Visualizador */}
       <div className="mb-8 sm:mb-4 bg-[#2d2d2d] rounded-lg border border-[#404040] overflow-hidden">
-        {/* Título do Áudio */}
         <div className="p-2.5 sm:p-3 border-b border-[#404040]">
           <h3 className="text-[#e1aa1e] font-medium text-center text-sm sm:text-base">
             {currentAudio?.title || 'Selecione um áudio'}
           </h3>
         </div>
 
-        {/* Área do Visualizador */}
         <div className="relative h-20 sm:h-32 bg-[#1e1e1e] p-3 sm:p-4 overflow-hidden">
           <canvas
             ref={canvasRef}
@@ -1172,14 +1187,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
             height={200}
           />
           
-          {/* Container das ondas e botão */}
           <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
             <div className="relative w-full h-full flex items-center justify-center">
-              {/* Círculos de animação */}
               {externalIsPlaying && (
                 <>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    {/* Ondas se expandindo - ajustadas para mobile */}
                     <div className="animate-wave-1 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
                     <div className="animate-wave-2 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
                     <div className="animate-wave-3 absolute w-8 sm:w-12 h-8 sm:h-12 rounded-full border-6 sm:border-8 border-[#e1aa1e] bg-[#e1aa1e]/20" style={{ boxShadow: '0 0 20px rgba(225,170,30,0.5), inset 0 0 20px rgba(225,170,30,0.5)' }} />
@@ -1189,7 +1201,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
                   </div>
                 </>
               )}
-              {/* Botão de Play */}
               <button
                 onClick={() => {
                   if (currentAudio) {
@@ -1227,7 +1238,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           </div>
         </div>
 
-        {/* Controles e Progresso */}
         <div className="p-3 sm:p-4 bg-[#1e1e1e]/50">
           <audio
             ref={audioRef}
@@ -1239,7 +1249,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
             className="hidden"
           />
 
-          {/* Barra de Progresso */}
           <div
             className="h-1.5 bg-[#404040] rounded-full cursor-pointer mb-2"
             onClick={handleProgressClick}
@@ -1250,13 +1259,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
             />
           </div>
 
-          {/* Tempo */}
           <div className="flex justify-between text-[10px] sm:text-xs text-gray-400 mb-2 sm:mb-3">
             <span>{formatTime(audioRef.current?.currentTime || 0)}</span>
             <span>{formatTime(audioRef.current?.duration || 0)}</span>
           </div>
 
-          {/* Próxima Reprodução */}
           {(() => {
             const nextInfo = getNextAudioInfo();
             if (!nextInfo?.nextAudio) return null;
@@ -1269,7 +1276,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
                   </div>
                   {nextInfo.timer && (
                     <div className="text-[10px] sm:text-xs text-[#e1aa1e]">
-                      Em {formatTimeLeft(nextInfo.timer.timeLeft)}
+                      {isTextToSpeechSpeaking ? "Esperando fala" : (currentTime < blockUntilRef.current ? `Iniciando em ${Math.max(0, Math.ceil((blockUntilRef.current - currentTime) / 1000))} segundos` : `Em ${formatTimeLeft(nextInfo.timer.timeLeft)}`)}
                     </div>
                   )}
                 </div>
@@ -1279,15 +1286,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         </div>
       </div>
 
-      {/* Cabeçalho da Lista */}
       <div className="mb-4 bg-[#2d2d2d] rounded-lg p-2 sm:p-2 border border-[#404040] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400 px-2">Lista de Áudios</span>
         </div>
 
-        {/* Botões de ação */}
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* Botão Falar Texto */}
           <button
             onClick={() => setIsTextToSpeechOpen(true)}
             className={`
@@ -1329,7 +1333,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
             </span>
           </button>
 
-          {/* Botão Anexar Áudio */}
           <label className={`
             bg-[#2d2d2d] hover:bg-[#404040] text-[#e1aa1e] px-4 py-2 rounded 
             flex items-center gap-2 transition-all duration-300 
@@ -1345,7 +1348,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
               />
             </svg>
             <span className="text-sm">
@@ -1362,7 +1365,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         </div>
       </div>
 
-      {/* Adicionar mensagem de erro após os botões de ação */}
       {uploadError && (
         <div className="mt-4 p-4 bg-gradient-to-r from-red-500/10 via-red-500/5 to-red-500/10 border border-red-500/20 rounded-lg backdrop-blur-sm animate-fade-in">
           <div className="flex items-start gap-3">
@@ -1387,7 +1389,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         </div>
       )}
 
-      {/* Lista de Áudios */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">
         <div className="text-xs text-gray-400 italic mb-2 px-2">
           Clique no ícone de edição ou dê um duplo clique no nome para renomear
@@ -1635,7 +1636,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
           onEdit={() => {
             setShowConfirmDialog(null);
             setConfirmPosition(null);
-            // Abre o diálogo de timer com a posição atual
             setPopupPosition(confirmPosition);
             setShowTimerDialog(showConfirmDialog);
           }}
@@ -1686,6 +1686,17 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ onEnded, isPlaying: externalI
         onClose={() => setIsTextToSpeechOpen(false)}
         onPlayingChange={(playing: boolean) => {
           setIsTextToSpeechSpeaking(playing);
+          if (!playing) {
+            blockUntilRef.current = Date.now() + 5000;
+            setTimeout(() => {
+              Object.keys(createNewCycleRefs.current).forEach(audioId => {
+                const timer = audioTimers[audioId];
+                if (timer && timer.timeLeft === 0 && createNewCycleRefs.current[audioId]) {
+                  createNewCycleRefs.current[audioId]!();
+                }
+              });
+            }, 5000);
+          }
           if (playing && audioRef.current && externalIsPlaying) {
             audioRef.current.pause();
             setExternalIsPlaying(false);

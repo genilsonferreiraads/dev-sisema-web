@@ -62,6 +62,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const [autoplayAttempts, setAutoplayAttempts] = useState(0);
   const maxAutoplayAttempts = 10; // Número máximo de tentativas
   const autoplayRef = useRef<NodeJS.Timeout | null>(null);
+  const [wasPlayingBeforeSeek, setWasPlayingBeforeSeek] = useState(true);
+  const lastPlayerState = useRef<number>(1);
 
   useEffect(() => {
     loadVideos();
@@ -129,6 +131,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
               if (isChangingVideo) {
                 attemptAutoplay();
               }
+
+              // Intercepta o método seekTo
+              const originalSeek = event.target.seekTo;
+              event.target.seekTo = function(seconds: number, allowSeekAhead: boolean) {
+                const currentState = this.getPlayerState();
+                setWasPlayingBeforeSeek(currentState === 1);
+                lastPlayerState.current = currentState;
+                
+                originalSeek.call(this, seconds, allowSeekAhead);
+                
+                // Força o play se estava reproduzindo antes
+                if (currentState === 1) {
+                  setTimeout(() => {
+                    this.playVideo();
+                  }, 50);
+                }
+              };
             },
             onStateChange: handleStateChange,
             onError: (error: any) => {
@@ -536,7 +555,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
   const handleStateChange = (event: any) => {
     if (isInternalStateChange) return;
 
-    if (event.data === 0) { // Video ended
+    const currentState = event.data;
+
+    if (currentState === 0) { // Video ended
       setIsChangingVideo(true);
       setAutoplayAttempts(0);
       
@@ -602,7 +623,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
         }
       }
       onEnded();
-    } else if (event.data === 1) { // Video started playing
+    } else if (currentState === 1) { // Video playing
       const audioElement = document.querySelector('audio');
       const isAudioPlaying = audioElement && !audioElement.paused;
       
@@ -612,32 +633,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ onEnded, isPlaying, setIsPlay
       
       setIsPlaying(true);
       setIsChangingVideo(false);
+      lastPlayerState.current = 1;
       
       if (autoplayRef.current) {
         clearInterval(autoplayRef.current);
       }
-    } else if (event.data === 2) { // Video was paused
-      if (!isChangingVideo && !isInternalStateChange) {
+    } else if (currentState === 2) { // Video paused
+      if (!isChangingVideo && !isInternalStateChange && lastPlayerState.current !== 1) {
         setIsPlaying(false);
+      } else if (wasPlayingBeforeSeek) {
+        setTimeout(() => {
+          if (player && isPlayerReady) {
+            player.playVideo();
+          }
+        }, 50);
       }
-    } else if (event.data === 5 || event.data === -1) { // Video cued/loaded or unstarted
-      if (isChangingVideo) {
-        const audioElement = document.querySelector('audio');
-        const isAudioPlaying = audioElement && !audioElement.paused;
-        
-        if (player && isPlayerReady) {
-          player.setVolume(isAudioPlaying ? 10 : 100);
-        }
-        
-        attemptAutoplay();
-      }
-    } else if (event.data === 3) { // Video buffering
-      // Se estiver em transição e bufferizando, tenta reproduzir novamente após um delay
+    } else if (currentState === 3) { // Buffering
       if (isChangingVideo) {
         setTimeout(() => {
           attemptAutoplay();
         }, 1000);
+      } else if (wasPlayingBeforeSeek) {
+        setTimeout(() => {
+          if (player && isPlayerReady) {
+            player.playVideo();
+          }
+        }, 50);
       }
+    }
+
+    // Atualiza o último estado conhecido
+    if (currentState !== 3) { // Ignora estado de buffering
+      lastPlayerState.current = currentState;
     }
   };
 

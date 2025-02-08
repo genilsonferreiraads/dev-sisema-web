@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { TTS_API_KEYS, BASE_URL } from '../config/api';
 import { temporaryAudioService } from '../services/temporaryAudio';
@@ -35,6 +36,8 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+  const [generatedAudioBlob, setGeneratedAudioBlob] = useState<Blob | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -495,6 +498,7 @@ TEXTO A SER MELHORADO:`;
         
         const url = URL.createObjectURL(audioBlob);
         
+        setGeneratedAudioBlob(audioBlob);
         setAudioUrl(url);
         setLastGeneratedText(textToSpeak);
         setSelectedVoice(voice); // Atualiza a voz selecionada para a que funcionou
@@ -625,6 +629,9 @@ TEXTO A SER MELHORADO:`;
     const text = e.target.value;
     setInputText(text);
     setOriginalText(text);
+    // Clear cached audio text so that changes force new audio generation
+    setLastGeneratedText("");
+    setSpeechText("");
   };
 
   useEffect(() => {
@@ -766,6 +773,40 @@ TEXTO A SER MELHORADO:`;
     }
   };
 
+  const handleInsertAudio = async () => {
+    if (!generatedAudioBlob) {
+      alert("Nenhum áudio gerado para inserir.");
+      return;
+    }
+    try {
+      const fileName = "tts_audio_" + Date.now() + ".mp3";
+      const { error: uploadError } = await supabase.storage
+        .from('audios')
+        .upload(fileName, generatedAudioBlob);
+      if (uploadError) {
+        throw uploadError;
+      }
+      const { data: publicUrlData } = supabase.storage
+        .from('audios')
+        .getPublicUrl(fileName);
+      const trimmedInput = inputText.trim();
+      const insTitle = trimmedInput.length > 30 ? trimmedInput.substring(0, 30) + "..." : (trimmedInput || "Audio TTS");
+      const { error: dbError } = await supabase
+        .from('audios')
+        .insert([{ title: insTitle, url: publicUrlData.publicUrl }]);
+      if (dbError) {
+        throw dbError;
+      }
+      setSuccessMessage("Áudio adicionado com sucesso!");
+      setTimeout(() => setSuccessMessage(null), 5000);
+      window.dispatchEvent(new Event('audioInserted'));
+      setGeneratedAudioBlob(null);
+    } catch (err) {
+      console.error("Erro ao inserir áudio na lista:", err);
+      alert("Erro ao inserir áudio na lista: " + (err instanceof Error ? err.message : err));
+    }
+  };
+
   if (!isModalOpen) return null;
 
   return (
@@ -857,93 +898,85 @@ TEXTO A SER MELHORADO:`;
               </div>
 
               <div className="relative group">
-                {optimizedText && (
-                  <div className="absolute -top-2.5 left-3 z-10 animate-fadeInScale">
-                    <span className="px-1.5 py-0.5 text-[10px] bg-[#1e1e1e] text-[#e1aa1e] border border-[#e1aa1e]/20 rounded-full shadow-sm flex items-center gap-1">
-                      <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        {isEditing ? (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        ) : (
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        )}
-                      </svg>
-                      {isEditing ? 'Editando' : 'Texto otimizado por IA'}
-                    </span>
-                  </div>
-                )}
-                
-                <div className="space-y-2">
-                  <div className="relative">
-                    <textarea
-                      ref={textareaRef}
-                      value={inputText}
-                      onChange={handleInputChange}
-                      onBlur={(e) => e.stopPropagation()}
-                      placeholder="Digite aqui o texto que você quer que seja falado..."
-                      className="w-full h-32 bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded-lg px-4 py-3 focus:border-[#e1aa1e] focus:outline-none resize-none transition-all duration-300 focus:shadow-[0_0_10px_rgba(225,170,30,0.3)] group-hover:border-[#e1aa1e]/50 pr-10"
-                      disabled={isLoading || isProcessingText || isTypingAnimation}
-                    />
-                    
-                    {/* Ícone Otimizar com IA */}
-                    <div 
-                      onClick={() => {
-                        if (!inputText.trim()) {
-                          setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
-                          return;
-                        }
-                        optimizeText(inputText);
-                      }}
-                      className={`
-                        absolute right-2 top-2 p-2 rounded-md cursor-pointer
-                        hover:bg-[#404040]/50 transition-all duration-300
-                        ${isOptimizingText || isTypingAnimation ? 'opacity-50 cursor-not-allowed' : ''}
-                        group/optimize
-                      `}
-                    >
-                      {/* Tooltip */}
-                      <div className="absolute bottom-full right-0 mb-2 w-64 opacity-0 scale-95 group-hover/optimize:opacity-100 group-hover/optimize:scale-100 transform transition-all duration-200 pointer-events-none z-50">
-                        <div className="bg-[#2d2d2d] border border-[#e1aa1e]/20 p-3 rounded-lg shadow-xl relative backdrop-blur-sm">
-                          <div className="flex items-start gap-2">
-                            <svg className="w-5 h-5 text-[#e1aa1e] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                            <div>
-                              <h4 className="text-[#e1aa1e] font-medium text-sm mb-1">Otimização com IA</h4>
-                              <p className="text-gray-400 text-xs leading-relaxed">
-                                Aprimora seu texto automaticamente para um formato mais profissional e adequado para anúncios de academia.
-                              </p>
-                            </div>
-                          </div>
-                          {/* Seta do tooltip */}
-                          <div className="absolute bottom-0 right-4 transform translate-y-full">
-                            <div className="w-3 h-3 bg-[#2d2d2d] border-r border-b border-[#e1aa1e]/20 transform rotate-45 -translate-y-1.5"></div>
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={inputText}
+                    onChange={handleInputChange}
+                    onBlur={(e) => e.stopPropagation()}
+                    placeholder="Digite aqui o texto que você quer que seja falado..."
+                    className="w-full h-32 bg-[#2d2d2d] border border-[#404040] text-gray-200 rounded-lg px-4 py-3 focus:border-[#e1aa1e] focus:outline-none resize-none transition-all duration-300 focus:shadow-[0_0_10px_rgba(225,170,30,0.3)] group-hover:border-[#e1aa1e]/50 pr-10"
+                    disabled={isLoading || isProcessingText || isTypingAnimation}
+                  />
+                  
+                  {/* Ícone Otimizar com IA */}
+                  <div 
+                    onClick={() => {
+                      if (!inputText.trim()) {
+                        setError('Por favor, digite algum texto para que eu possa ajudar a melhorá-lo.');
+                        return;
+                      }
+                      optimizeText(inputText);
+                    }}
+                    className={`
+                      absolute right-2 top-2 p-2 rounded-md cursor-pointer
+                      hover:bg-[#404040]/50 transition-all duration-300
+                      ${isOptimizingText || isTypingAnimation ? 'opacity-50 cursor-not-allowed' : ''}
+                      group/optimize
+                    `}
+                  >
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full right-0 mb-2 w-64 opacity-0 scale-95 group-hover/optimize:opacity-100 group-hover/optimize:scale-100 transform transition-all duration-200 pointer-events-none z-50">
+                      <div className="bg-[#2d2d2d] border border-[#e1aa1e]/20 p-3 rounded-lg shadow-xl relative backdrop-blur-sm">
+                        <div className="flex items-start gap-2">
+                          <svg className="w-5 h-5 text-[#e1aa1e] mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          <div>
+                            <h4 className="text-[#e1aa1e] font-medium text-sm mb-1">Otimização com IA</h4>
+                            <p className="text-gray-400 text-xs leading-relaxed">
+                              Aprimora seu texto automaticamente para um formato mais profissional e adequado para anúncios de academia.
+                            </p>
                           </div>
                         </div>
+                        {/* Seta do tooltip */}
+                        <div className="absolute bottom-0 right-4 transform translate-y-full">
+                          <div className="w-3 h-3 bg-[#2d2d2d] border-r border-b border-[#e1aa1e]/20 transform rotate-45 -translate-y-1.5"></div>
+                        </div>
                       </div>
-
-                      {isOptimizingText ? (
-                        <svg className="animate-spin h-5 w-5 text-[#e1aa1e]" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5 text-[#e1aa1e] transition-transform duration-300 group-hover/optimize:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
-                      )}
                     </div>
-                  </div>
 
-                  {/* Mensagem de erro */}
-                  {error && (
-                    <div className="text-sm text-[#e1aa1e] bg-[#e1aa1e]/10 px-3 py-2 rounded-md border border-[#e1aa1e]/20 flex items-center gap-2 animate-fadeInScale">
-                      <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    {isOptimizingText ? (
+                      <svg className="animate-spin h-5 w-5 text-[#e1aa1e]" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                       </svg>
-                      <span>{error}</span>
-                    </div>
-                  )}
+                    ) : (
+                      <svg className="w-5 h-5 text-[#e1aa1e] transition-transform duration-300 group-hover/optimize:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    )}
+                  </div>
                 </div>
+
+                {successMessage && (
+                  <div className="text-sm bg-green-600 text-white px-3 py-2 rounded-md border border-green-700 flex items-center gap-2 animate-fadeInScale">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+
+                {/* Mensagem de erro */}
+                {error && (
+                  <div className="text-sm text-[#e1aa1e] bg-[#e1aa1e]/10 px-3 py-2 rounded-md border border-[#e1aa1e]/20 flex items-center gap-2 animate-fadeInScale">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>{error}</span>
+                  </div>
+                )}
               </div>
 
               {/* Disclaimer de IA */}
@@ -1058,6 +1091,15 @@ TEXTO A SER MELHORADO:`;
                     <svg className="w-4 h-4 transition-transform duration-300 group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                     </svg>
+                  </button>
+                )}
+
+                {generatedAudioBlob && (
+                  <button onClick={handleInsertAudio} className="px-4 py-2 rounded-lg transition-all duration-300 cursor-pointer bg-[#2d2d2d] hover:bg-[#404040] border border-[#404040] hover:border-[#e1aa1e] text-[#e1aa1e] flex items-center gap-2 whitespace-nowrap active:scale-95 active:opacity-75">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Inserir na lista
                   </button>
                 )}
               </div>
