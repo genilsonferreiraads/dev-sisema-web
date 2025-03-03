@@ -104,7 +104,7 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
       }
 
       const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
       const ANNOUNCEMENT_PROMPT = `Você é um assistente especializado em criar anúncios profissionais para uma academia. 
 
