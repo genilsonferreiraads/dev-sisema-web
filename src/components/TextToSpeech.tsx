@@ -398,7 +398,7 @@ TEXTO A SER MELHORADO:`;
           }
 
           const response = await fetch(
-            `https://texttospeech.googleapis.com/v1/text:synthesize?key=${TTS_API_KEYS.google}`,
+            `https://texttospeech.googleapis.com/v1beta1/text:synthesize?key=${TTS_API_KEYS.google}`,
             {
               method: 'POST',
               headers: {
@@ -408,15 +408,15 @@ TEXTO A SER MELHORADO:`;
                 input: { text: textToSpeak },
                 voice: {
                   languageCode: 'pt-BR',
-                  name: 'pt-BR-Wavenet-D',
+                  name: 'pt-BR-Chirp3-HD-Aoede',
                   ssmlGender: 'FEMALE'
                 },
                 audioConfig: {
                   audioEncoding: 'MP3',
-                  pitch: 1.0,
-                  speakingRate: 1.05,
+                  pitch: 0,
+                  speakingRate: 1,
                   volumeGainDb: 3.0,
-                  effectsProfileId: ['headphone-class-device']
+                  effectsProfileId: ['small-bluetooth-speaker-class-device']
                 },
               }),
             }
@@ -664,7 +664,7 @@ TEXTO A SER MELHORADO:`;
         }
 
         const response = await fetch(
-          `https://texttospeech.googleapis.com/v1/text:synthesize?key=${TTS_API_KEYS.google}`,
+          `https://texttospeech.googleapis.com/v1beta1/text:synthesize?key=${TTS_API_KEYS.google}`,
           {
             method: 'POST',
             headers: {
@@ -674,15 +674,15 @@ TEXTO A SER MELHORADO:`;
               input: { text: textToSpeak },
               voice: {
                 languageCode: 'pt-BR',
-                name: 'pt-BR-Wavenet-D',
+                name: 'pt-BR-Chirp3-HD-Aoede',
                 ssmlGender: 'FEMALE'
               },
               audioConfig: {
                 audioEncoding: 'MP3',
-                pitch: 1.0,
-                speakingRate: 1.05,
+                pitch: 0,
+                speakingRate: 1,
                 volumeGainDb: 3.0,
-                effectsProfileId: ['headphone-class-device']
+                effectsProfileId: ['small-bluetooth-speaker-class-device']
               },
             }),
           }
