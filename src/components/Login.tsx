@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { authService } from '../lib/auth';
 import logo from '../assets/Logo Site Império.png';
-import backgroundImg from '../assets/background-login.png';
+import backgroundImg from '../assets/Background-login-2.png';
 
 interface LoginProps {
   onLoginSuccess: () => void;
