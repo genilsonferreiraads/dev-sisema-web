@@ -406,8 +406,25 @@ export const videoService = {
 
   async saveVideoHistory(userId: string, videoId: string): Promise<void> {
     try {
+      if (!userId || !videoId) {
+        console.error('userId e videoId são obrigatórios');
+        return;
+      }
+
       const now = new Date().toISOString();
       
+      // Busca todos os registros do usuário para atualizar a ordem
+      const { data: userHistory, error: historyError } = await supabase
+        .from('user_video_history')
+        .select('id, watch_order')
+        .eq('user_id', userId)
+        .order('watch_order', { ascending: true });
+
+      if (historyError) {
+        console.error('Erro ao buscar histórico:', historyError);
+        return;
+      }
+
       // Tenta atualizar se existir
       const { data: existingData, error: checkError } = await supabase
         .from('user_video_history')
@@ -421,7 +438,9 @@ export const videoService = {
         return;
       }
 
+      // Se o registro existir, atualiza
       if (existingData?.id) {
+        // Atualiza o registro existente para ser o mais recente
         const { error: updateError } = await supabase
           .from('user_video_history')
           .update({
@@ -434,7 +453,27 @@ export const videoService = {
           console.error('Erro ao atualizar histórico:', updateError);
           return;
         }
+
+        // Atualiza a ordem dos outros registros
+        for (const record of userHistory) {
+          if (record.id !== existingData.id) {
+            await supabase
+              .from('user_video_history')
+              .update({ watch_order: record.watch_order + 1 })
+              .eq('id', record.id);
+          }
+        }
       } else {
+        // Se não existir, cria um novo registro
+        // Primeiro incrementa a ordem de todos os registros existentes
+        for (const record of userHistory) {
+          await supabase
+            .from('user_video_history')
+            .update({ watch_order: record.watch_order + 1 })
+            .eq('id', record.id);
+        }
+
+        // Insere o novo registro como o mais recente
         const { error: insertError } = await supabase
           .from('user_video_history')
           .insert([{
@@ -448,15 +487,6 @@ export const videoService = {
           console.error('Erro ao inserir histórico:', insertError);
           return;
         }
-      }
-
-      // Tenta reordenar o histórico e trata possíveis erros
-      const { error: reorderError } = await supabase
-        .rpc('reorder_video_history', { p_user_id: userId });
-
-      if (reorderError) {
-        console.error('Erro ao reordenar histórico:', reorderError);
-        // Não retorna aqui, pois o registro principal já foi salvo
       }
 
     } catch (error) {
@@ -549,4 +579,4 @@ export const videoService = {
       throw error;
     }
   }
-}; 
+};

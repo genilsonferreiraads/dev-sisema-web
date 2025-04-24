@@ -58,35 +58,40 @@ const VideoSidebar: React.FC<VideoSidebarProps> = ({
 
   // Função para ordenar os vídeos baseado no histórico e remover duplicatas
   const sortedVideos = React.useMemo(() => {
-    const MAX_VIDEOS = 30; // Alterado para 30 vídeos
-
-    if (!lastWatchedVideos.length) {
-      // Remove duplicatas da lista original usando a URL como chave
-      const uniqueVideos = videos.filter((video, index, self) =>
-        index === self.findIndex((v) => v.url === video.url)
-      );
-      // Retorna apenas os 30 últimos vídeos
-      return uniqueVideos.slice(0, MAX_VIDEOS);
-    }
+    const MAX_VIDEOS = 30;
 
     // Primeiro remove as duplicatas
     const uniqueVideos = videos.filter((video, index, self) =>
       index === self.findIndex((v) => v.url === video.url)
     );
 
-    // Depois ordena baseado no histórico
-    const orderedVideos = [...uniqueVideos].sort((a, b) => {
-      const indexA = lastWatchedVideos.indexOf(a.id);
-      const indexB = lastWatchedVideos.indexOf(b.id);
-      
-      // Se não estiver no histórico, vai para o final
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-      
-      return indexA - indexB;
-    });
+    if (!lastWatchedVideos || lastWatchedVideos.length === 0) {
+      return uniqueVideos.slice(0, MAX_VIDEOS);
+    }
 
-    // Retorna apenas os 30 primeiros vídeos
+    // Separa os vídeos em dois grupos: assistidos e não assistidos
+    const watchedVideos = [];
+    const unwatchedVideos = [];
+
+    for (const video of uniqueVideos) {
+      const index = lastWatchedVideos.indexOf(video.id);
+      if (index !== -1) {
+        watchedVideos.push({ video, index });
+      } else {
+        unwatchedVideos.push(video);
+      }
+    }
+
+    // Ordena os vídeos assistidos pelo índice do histórico (mais recentes primeiro)
+    watchedVideos.sort((a, b) => a.index - b.index);
+
+    // Combina os vídeos assistidos com os não assistidos
+    const orderedVideos = [
+      ...watchedVideos.map(item => item.video),
+      ...unwatchedVideos
+    ];
+
+    // Retorna no máximo MAX_VIDEOS vídeos
     return orderedVideos.slice(0, MAX_VIDEOS);
   }, [videos, lastWatchedVideos]);
 
@@ -177,4 +182,4 @@ const VideoSidebar: React.FC<VideoSidebarProps> = ({
   );
 };
 
-export default VideoSidebar; 
+export default VideoSidebar;

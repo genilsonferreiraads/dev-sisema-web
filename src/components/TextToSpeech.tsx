@@ -17,7 +17,7 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
   onPlayingChange
 }) => {
   const [inputText, setInputText] = useState('');
-  const [selectedVoice, setSelectedVoice] = useState<'azure' | 'google' | 'elevenlabs'>('azure');
+  const [selectedVoice, setSelectedVoice] = useState<'google' | 'elevenlabs'>('google');
   const [isTypingAnimation, setIsTypingAnimation] = useState(false);
   const [typingIndex, setTypingIndex] = useState(0);
   const [optimizedText, setOptimizedText] = useState('');
@@ -46,12 +46,16 @@ const TextToSpeech: React.FC<TextToSpeechProps> = ({
     setIsAudioPlaying(true);
     onPlayingChange(true);
     window.dispatchEvent(new Event('audioPlay'));
+    // Adiciona evento para reduzir volume do vídeo
+    window.dispatchEvent(new CustomEvent('ttsVolumeChange', { detail: { shouldReduceVolume: true } }));
   };
 
   const notifyAudioEnd = () => {
     setIsAudioPlaying(false);
     onPlayingChange(false);
     window.dispatchEvent(new Event('audioStop'));
+    // Adiciona evento para restaurar volume do vídeo
+    window.dispatchEvent(new CustomEvent('ttsVolumeChange', { detail: { shouldReduceVolume: false } }));
   };
 
   const setupAudioElement = async (url: string): Promise<void> => {
@@ -378,7 +382,7 @@ TEXTO A SER MELHORADO:`;
     setError(null);
 
     // Array com a ordem das vozes para tentar
-    const voiceOrder = ['azure', 'google', 'elevenlabs'] as const;
+    const voiceOrder = ['google', 'elevenlabs'] as const;
     // Reorganiza o array para começar com a voz selecionada
     const orderedVoices = [
       selectedVoice,
@@ -436,7 +440,7 @@ TEXTO A SER MELHORADO:`;
             [Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))],
             { type: 'audio/mp3' }
           );
-        } else if (voice === 'elevenlabs') {
+        } else {
           if (!TTS_API_KEYS.elevenlabs) {
             throw new Error('Chave da API do ElevenLabs não configurada');
           }
@@ -464,33 +468,6 @@ TEXTO A SER MELHORADO:`;
 
           if (!response.ok) {
             throw new Error('Erro ao gerar áudio com ElevenLabs');
-          }
-
-          audioBlob = await response.blob();
-        } else {
-          if (!TTS_API_KEYS.azure) {
-            throw new Error('Chave da API da Azure não configurada');
-          }
-
-          const response = await fetch(
-            'https://brazilsouth.tts.speech.microsoft.com/cognitiveservices/v1',
-            {
-              method: 'POST',
-              headers: {
-                'Ocp-Apim-Subscription-Key': TTS_API_KEYS.azure,
-                'Content-Type': 'application/ssml+xml',
-                'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
-              },
-              body: `<speak version='1.0' xml:lang='pt-BR'>
-                <voice xml:lang='pt-BR' xml:gender='Female' name='pt-BR-FranciscaNeural'>
-                  ${textToSpeak}
-                </voice>
-              </speak>`
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error('Erro ao gerar áudio com Azure');
           }
 
           audioBlob = await response.blob();
@@ -702,7 +679,7 @@ TEXTO A SER MELHORADO:`;
           [Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))],
           { type: 'audio/mp3' }
         );
-      } else if (selectedVoice === 'elevenlabs') {
+      } else {
         if (!TTS_API_KEYS.elevenlabs) {
           throw new Error('Chave da API do ElevenLabs não configurada');
         }
@@ -730,33 +707,6 @@ TEXTO A SER MELHORADO:`;
 
         if (!response.ok) {
           throw new Error('Erro ao gerar áudio com ElevenLabs');
-        }
-
-        audioBlob = await response.blob();
-      } else {
-        if (!TTS_API_KEYS.azure) {
-          throw new Error('Chave da API da Azure não configurada');
-        }
-
-        const response = await fetch(
-          'https://brazilsouth.tts.speech.microsoft.com/cognitiveservices/v1',
-          {
-            method: 'POST',
-            headers: {
-              'Ocp-Apim-Subscription-Key': TTS_API_KEYS.azure,
-              'Content-Type': 'application/ssml+xml',
-              'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3'
-            },
-            body: `<speak version='1.0' xml:lang='pt-BR'>
-              <voice xml:lang='pt-BR' xml:gender='Female' name='pt-BR-FranciscaNeural'>
-                ${textToSpeak}
-              </voice>
-            </speak>`
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error('Erro ao gerar áudio com Azure');
         }
 
         audioBlob = await response.blob();
@@ -854,23 +804,9 @@ TEXTO A SER MELHORADO:`;
                 <div className="flex gap-3">
                   <button
                     onClick={() => {
-                      setSelectedVoice('azure');
-                      setLastGeneratedText('');
-                      setAudioUrl(null);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg transition-all duration-300 text-sm ${
-                      selectedVoice === 'azure'
-                        ? 'bg-[#e1aa1e] text-gray-900 font-medium'
-                        : 'bg-[#2d2d2d] text-gray-400 hover:bg-[#404040]'
-                    }`}
-                  >
-                    Azure
-                  </button>
-                  <button
-                    onClick={() => {
                       setSelectedVoice('google');
                       setLastGeneratedText('');
-                        setAudioUrl(null);
+                      setAudioUrl(null);
                     }}
                     className={`px-3 py-1.5 rounded-lg transition-all duration-300 text-sm ${
                       selectedVoice === 'google'
@@ -884,7 +820,7 @@ TEXTO A SER MELHORADO:`;
                     onClick={() => {
                       setSelectedVoice('elevenlabs');
                       setLastGeneratedText('');
-                        setAudioUrl(null);
+                      setAudioUrl(null);
                     }}
                     className={`px-3 py-1.5 rounded-lg transition-all duration-300 text-sm ${
                       selectedVoice === 'elevenlabs'

@@ -26,6 +26,12 @@ export const authService = {
         };
         
         sessionStorage.setItem('user', JSON.stringify(userData));
+        // Dispatch storage event to notify components
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'user',
+          newValue: JSON.stringify(userData),
+          storageArea: sessionStorage
+        }));
         return userData;
       }
 

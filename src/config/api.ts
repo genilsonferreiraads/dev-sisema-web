@@ -12,8 +12,7 @@ const geminiKey = process.env.REACT_APP_GEMINI_API_KEY;
 export const TTS_API_KEYS = {
   google: process.env.REACT_APP_GOOGLE_TTS_API_KEY || '',
   gemini: process.env.REACT_APP_GEMINI_API_KEY || '',
-  elevenlabs: process.env.REACT_APP_ELEVENLABS_API_KEY || '',
-  azure: process.env.REACT_APP_AZURE_TTS_API_KEY || ''
+  elevenlabs: process.env.REACT_APP_ELEVENLABS_API_KEY || ''
 };
 
 export const getApiKeys = () => [...YOUTUBE_API_KEYS];
